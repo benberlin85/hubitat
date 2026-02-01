@@ -338,6 +338,12 @@ private void scheduleHealthCheck() {
     }
 }
 
+// Legacy method - kept for compatibility with old scheduled jobs
+def pollTemperature() {
+    logDebug "pollTemperature called - redirecting to refresh"
+    refresh()
+}
+
 def healthCheck() {
     def lastActivity = state.lastSuccessfulComm ?: 0
     def healthInterval = (healthCheckInterval ?: "120") as int
@@ -482,10 +488,10 @@ def ping() {
 
 def setHeatingSetpoint(BigDecimal temperature) {
     // Convert from Fahrenheit to Celsius if needed
-    def tempC = temperature
+    BigDecimal tempC = temperature as BigDecimal
     if (tempUnit == "F") {
         tempC = (temperature - 32) * 5 / 9
-        tempC = Math.round(tempC * 10) / 10.0
+        tempC = ((tempC * 10).toLong()) / 10.0
     }
 
     tempC = constrainTemperature(tempC)
@@ -582,12 +588,12 @@ def setWindowDetection(String enabled) {
     sendZigbeeCommands(cmds)
 }
 
-def setFrostProtection(BigDecimal temperature) {
+def setFrostProtection(temperature) {
     // Convert from Fahrenheit to Celsius if needed
-    def tempC = temperature
+    BigDecimal tempC = temperature as BigDecimal
     if (tempUnit == "F") {
         tempC = (temperature - 32) * 5 / 9
-        tempC = Math.round(tempC * 10) / 10.0
+        tempC = ((tempC * 10).toLong()) / 10.0
     }
 
     tempC = constrainTemperature(tempC)
@@ -603,12 +609,13 @@ def setFrostProtection(BigDecimal temperature) {
     sendZigbeeCommands(cmds)
 }
 
-def setTemperatureCalibration(BigDecimal offset) {
-    offset = Math.max(CALIBRATION_MIN, Math.min(CALIBRATION_MAX, offset))
-    logInfo "Setting temperature calibration to ${offset}°C"
+def setTemperatureCalibration(offset) {
+    BigDecimal offsetVal = offset as BigDecimal
+    offsetVal = [[offsetVal, CALIBRATION_MAX].min(), CALIBRATION_MIN].max()
+    logInfo "Setting temperature calibration to ${offsetVal}°C"
 
     // Calibration is stored as Int8 with 0.1°C resolution
-    def zigbeeOffset = (offset * 10) as int
+    def zigbeeOffset = (offsetVal * 10) as int
 
     def cmds = []
     cmds += zigbee.writeAttribute(CLUSTER_THERMOSTAT, ATTR_TEMP_CALIBRATION, 0x28, zigbeeOffset)
@@ -618,36 +625,38 @@ def setTemperatureCalibration(BigDecimal offset) {
     sendZigbeeCommands(cmds)
 }
 
-def setValvePosition(BigDecimal position) {
-    position = Math.max(0, Math.min(100, position)) as int
-    logInfo "Setting valve position to ${position}%"
+def setValvePosition(position) {
+    Integer positionInt = position as Integer
+    positionInt = [[positionInt, 100].min(), 0].max()
+    logInfo "Setting valve position to ${positionInt}%"
 
     def cmds = []
-    cmds += zigbee.writeAttribute(CLUSTER_FC11, ATTR_VALVE_OPENING, 0x20, position)
+    cmds += zigbee.writeAttribute(CLUSTER_FC11, ATTR_VALVE_OPENING, 0x20, positionInt)
     cmds += "delay 500"
     cmds += zigbee.readAttribute(CLUSTER_FC11, ATTR_VALVE_OPENING)
 
     sendZigbeeCommands(cmds)
 }
 
-def setValveClosingDegree(BigDecimal degree) {
-    degree = Math.max(0, Math.min(100, degree)) as int
-    logInfo "Setting valve closing degree to ${degree}%"
+def setValveClosingDegree(degree) {
+    Integer degreeInt = degree as Integer
+    degreeInt = [[degreeInt, 100].min(), 0].max()
+    logInfo "Setting valve closing degree to ${degreeInt}%"
 
     def cmds = []
-    cmds += zigbee.writeAttribute(CLUSTER_FC11, ATTR_VALVE_CLOSING, 0x20, degree)
+    cmds += zigbee.writeAttribute(CLUSTER_FC11, ATTR_VALVE_CLOSING, 0x20, degreeInt)
     cmds += "delay 500"
     cmds += zigbee.readAttribute(CLUSTER_FC11, ATTR_VALVE_CLOSING)
 
     sendZigbeeCommands(cmds)
 }
 
-def setMinHeatingSetpoint(BigDecimal temperature) {
+def setMinHeatingSetpoint(temperature) {
     // Convert from Fahrenheit to Celsius if needed
-    def tempC = temperature
+    BigDecimal tempC = temperature as BigDecimal
     if (tempUnit == "F") {
         tempC = (temperature - 32) * 5 / 9
-        tempC = Math.round(tempC * 10) / 10.0
+        tempC = ((tempC * 10).toLong()) / 10.0
     }
 
     tempC = constrainTemperature(tempC)
@@ -663,12 +672,12 @@ def setMinHeatingSetpoint(BigDecimal temperature) {
     sendZigbeeCommands(cmds)
 }
 
-def setMaxHeatingSetpoint(BigDecimal temperature) {
+def setMaxHeatingSetpoint(temperature) {
     // Convert from Fahrenheit to Celsius if needed
-    def tempC = temperature
+    BigDecimal tempC = temperature as BigDecimal
     if (tempUnit == "F") {
         tempC = (temperature - 32) * 5 / 9
-        tempC = Math.round(tempC * 10) / 10.0
+        tempC = ((tempC * 10).toLong()) / 10.0
     }
 
     tempC = constrainTemperature(tempC)
@@ -684,12 +693,12 @@ def setMaxHeatingSetpoint(BigDecimal temperature) {
     sendZigbeeCommands(cmds)
 }
 
-def setExternalTemperature(BigDecimal temperature) {
+def setExternalTemperature(temperature) {
     // Convert from Fahrenheit to Celsius if needed
-    def tempC = temperature
+    BigDecimal tempC = temperature as BigDecimal
     if (tempUnit == "F") {
         tempC = (temperature - 32) * 5 / 9
-        tempC = Math.round(tempC * 10) / 10.0
+        tempC = ((tempC * 10).toLong()) / 10.0
     }
 
     logInfo "Setting external temperature to ${tempC}°C"
@@ -718,12 +727,13 @@ def setExternalSensor(String sensor) {
     sendZigbeeCommands(cmds)
 }
 
-def setTemperatureAccuracy(BigDecimal accuracy) {
-    accuracy = Math.max(-1.0, Math.min(-0.2, accuracy))
-    logInfo "Setting temperature accuracy to ${accuracy}°C"
+def setTemperatureAccuracy(accuracy) {
+    BigDecimal accuracyVal = accuracy as BigDecimal
+    accuracyVal = [[accuracyVal, -0.2].min(), -1.0].max()
+    logInfo "Setting temperature accuracy to ${accuracyVal}°C"
 
     // Accuracy is stored as Int8 with 0.1°C resolution (negative values)
-    def zigbeeAccuracy = (accuracy * 10) as int
+    def zigbeeAccuracy = (accuracyVal * 10) as int
 
     def cmds = []
     cmds += zigbee.writeAttribute(CLUSTER_FC11, ATTR_TEMP_ACCURACY, 0x28, zigbeeAccuracy)
@@ -825,10 +835,10 @@ private List handlePowerCluster(String attrId, String value) {
             break
 
         case "0021":  // Battery Percentage
-            def rawBattery = Integer.parseInt(value, 16)
+            Integer rawBattery = Integer.parseInt(value, 16)
             // SONOFF reports 0-200 (0.5% increments)
-            def battery = Math.round(rawBattery / 2)
-            battery = Math.min(100, Math.max(0, battery))
+            Integer battery = (rawBattery / 2).toInteger()
+            battery = [[battery, 100].min(), 0].max()
             events << createEvent(name: "battery", value: battery, unit: "%")
             logInfo "Battery: ${battery}%"
             break
@@ -1136,19 +1146,21 @@ void sendZigbeeCommands(def cmds) {
 
 // ==================== Helper Methods ====================
 
-private BigDecimal constrainTemperature(BigDecimal temp) {
-    return Math.max(TEMP_MIN, Math.min(TEMP_MAX, temp))
+private BigDecimal constrainTemperature(temp) {
+    BigDecimal tempVal = temp as BigDecimal
+    return [[tempVal, TEMP_MAX].min(), TEMP_MIN].max()
 }
 
 /**
  * Convert temperature from Fahrenheit to Celsius if user preference is Fahrenheit
  */
-private BigDecimal convertToDeviceTemp(BigDecimal temperature) {
+private BigDecimal convertToDeviceTemp(temperature) {
+    BigDecimal tempVal = temperature as BigDecimal
     if (tempUnit == "F") {
-        def tempC = (temperature - 32) * 5 / 9
-        return Math.round(tempC * 10) / 10.0
+        BigDecimal tempC = (tempVal - 32) * 5 / 9
+        return ((tempC * 10).toLong()) / 10.0
     }
-    return temperature
+    return tempVal
 }
 
 private int temperatureToZigbee(BigDecimal temp) {
@@ -1175,13 +1187,14 @@ private int hexToSignedInt(String hex) {
     return value
 }
 
-private BigDecimal formatTemperature(BigDecimal temp) {
+private BigDecimal formatTemperature(temp) {
     // Round to 1 decimal place and avoid scientific notation
-    temp = new BigDecimal(Math.round(temp.doubleValue() * 10)).divide(new BigDecimal(10), 1, BigDecimal.ROUND_HALF_UP)
+    BigDecimal tempVal = temp as BigDecimal
+    tempVal = new BigDecimal(((tempVal * 10).toLong())).divide(new BigDecimal(10), 1, BigDecimal.ROUND_HALF_UP)
     if (tempUnit == "F") {
-        temp = temp.multiply(new BigDecimal(9)).divide(new BigDecimal(5), 1, BigDecimal.ROUND_HALF_UP).add(new BigDecimal(32))
+        tempVal = tempVal.multiply(new BigDecimal(9)).divide(new BigDecimal(5), 1, BigDecimal.ROUND_HALF_UP).add(new BigDecimal(32))
     }
-    return temp
+    return tempVal
 }
 
 private String getTemperatureUnit() {
