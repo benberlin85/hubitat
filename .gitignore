@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+.claude/
+.AppleDouble
+.LSOverride
+._*
+
+# Hubitat
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
