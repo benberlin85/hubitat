@@ -40,6 +40,54 @@ Simple on/off driver for Aqara H1 EU Single Switch.
 
 ---
 
+#### Aqara Smart Plug EU
+**Location:** `Drivers/Aqara/aqara_smart_plug_eu.groovy`
+
+Comprehensive driver for the Aqara Smart Plug EU with power monitoring.
+
+**Features:**
+- On/Off control
+- Power monitoring (W)
+- Energy metering (kWh)
+- Voltage monitoring (V)
+- Current monitoring (A)
+- Device temperature
+- Overload protection (configurable 100-2300W)
+- Power outage memory
+- LED disable (night mode)
+- Button lock
+- Health check monitoring
+
+**Supported Models:** lumi.plug.maeu01 / SP-EUC01
+
+**Note:** Some firmware versions may cause the plug to respond to unrelated switch commands from devices routed through it. This is a [known firmware issue](https://github.com/Koenkk/zigbee2mqtt/issues/13903).
+
+---
+
+#### Aqara H1 Double Rocker Remote
+**Location:** `Drivers/Aqara/aqara_h1_double_rocker_remote.groovy`
+
+Simple, focused driver for the Aqara H1 Wireless Remote Switch (Double Rocker).
+
+**Features:**
+- Single, double, triple press detection
+- Hold and release detection
+- Both buttons pressed simultaneously
+- Battery monitoring
+- Configurable click mode (fast vs multi)
+- Hubitat Button Controller compatible
+
+**Button Mapping:**
+- Button 1: Left rocker
+- Button 2: Right rocker
+- Button 3: Both rockers together
+
+**Supported Models:** lumi.remote.b28ac1 / WRS-R02
+
+**Pairing:** Hold the LEFT rocker for 10 seconds until LEDs flash.
+
+---
+
 #### Zigbee Device Discovery Tool
 **Location:** `Drivers/zigbee-device-discovery.groovy`
 
@@ -87,7 +135,9 @@ Unified heating control system for multiple TRVs.
 hubitat/
 ├── Drivers/
 │   ├── Aqara/
-│   │   └── aqara_h1_eu_single_switch.groovy
+│   │   ├── aqara_h1_eu_single_switch.groovy
+│   │   ├── aqara_smart_plug_eu.groovy
+│   │   └── aqara_h1_double_rocker_remote.groovy
 │   ├── Sonoff/
 │   │   └── zigbee-sonoff-trvzb.groovy
 │   └── zigbee-device-discovery.groovy
@@ -139,7 +189,12 @@ The following resources were used as references during development:
 - [Koenkk/zigbee-herdsman-converters](https://github.com/Koenkk/zigbee-herdsman-converters) - Converter implementations and attribute mappings
 
 #### Aqara Devices
-- [Zigbee2MQTT - Aqara Switches](https://www.zigbee2mqtt.io/devices/WS-EUK01.html) - Aqara H1 EU switch documentation
+- [Zigbee2MQTT - Aqara H1 Switch](https://www.zigbee2mqtt.io/devices/WS-EUK01.html) - Aqara H1 EU switch documentation
+- [Zigbee2MQTT - Aqara Smart Plug](https://www.zigbee2mqtt.io/devices/SP-EUC01.html) - Aqara Smart Plug EU documentation
+- [Zigbee2MQTT - Aqara H1 Remote](https://www.zigbee2mqtt.io/devices/WRS-R02.html) - Aqara H1 Double Rocker remote documentation
+- [Aqara Plug Random Toggle Issue](https://github.com/Koenkk/zigbee2mqtt/issues/13903) - Known firmware issue documentation
+- [Aqara H1 Remote Support](https://github.com/Koenkk/zigbee-herdsman-converters/issues/2620) - Technical implementation details
+- [Blakadder Zigbee Database](https://zigbee.blakadder.com/) - Device compatibility information
 - Hubitat Generic Zigbee Switch driver - Base implementation reference
 
 #### Hubitat Development
