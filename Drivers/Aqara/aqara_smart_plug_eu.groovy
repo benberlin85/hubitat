@@ -368,15 +368,16 @@ def off() {
 
 // ==================== Custom Commands ====================
 
-def setOverloadProtection(BigDecimal maxPower) {
-    maxPower = Math.max(100, Math.min(2300, maxPower)) as int
-    logInfo "Setting overload protection to ${maxPower}W"
+def setOverloadProtection(maxPower) {
+    Integer maxPowerInt = maxPower as Integer
+    maxPowerInt = [[maxPowerInt, 2300].min(), 100].max()
+    logInfo "Setting overload protection to ${maxPowerInt}W"
 
     // Write to Lumi manufacturer-specific cluster
     def cmds = []
-    cmds += zigbee.writeAttribute(CLUSTER_LUMI, 0x020B, 0x39, floatToHex(maxPower), [mfgCode: LUMI_MFG_CODE])
+    cmds += zigbee.writeAttribute(CLUSTER_LUMI, 0x020B, 0x39, floatToHex(maxPowerInt), [mfgCode: LUMI_MFG_CODE])
 
-    sendEvent(name: "overloadProtection", value: maxPower, unit: "W")
+    sendEvent(name: "overloadProtection", value: maxPowerInt, unit: "W")
     sendZigbeeCommands(cmds)
 }
 
@@ -488,18 +489,18 @@ private List handleMeteringCluster(String attrId, String value) {
 
     switch(attrId) {
         case "0000":  // Current Summation Delivered (Energy)
-            def rawValue = Long.parseLong(value, 16)
-            def divisor = state.energyDivisor ?: (energyDivisor ?: 1000)
-            def energy = rawValue / divisor
+            Long rawValue = Long.parseLong(value, 16)
+            BigDecimal divisor = state.energyDivisor ?: (energyDivisor ?: 1000)
+            BigDecimal energy = rawValue / divisor
 
             // Format appropriately
             def energyFormatted
             def unit = "kWh"
             if (energy < 0.01) {
-                energyFormatted = (energy * 1000).round(1)
+                energyFormatted = ((energy * 10000).toLong()) / 10.0  // 1 decimal place in Wh
                 unit = "Wh"
             } else {
-                energyFormatted = energy.round(3)
+                energyFormatted = ((energy * 1000).toLong()) / 1000.0  // 3 decimal places
             }
 
             events << createEvent(name: "energy", value: energyFormatted, unit: unit)
@@ -525,26 +526,26 @@ private List handleElectricalCluster(String attrId, String value) {
 
     switch(attrId) {
         case "050B":  // Active Power
-            def rawPower = Integer.parseInt(value, 16)
-            def divisor = state.powerDivisor ?: (powerDivisor ?: 10)
-            def power = rawPower / divisor
-            def powerFormatted = power.round(1)
+            Integer rawPower = Integer.parseInt(value, 16)
+            BigDecimal divisor = state.powerDivisor ?: (powerDivisor ?: 10)
+            BigDecimal power = rawPower / divisor
+            BigDecimal powerFormatted = ((power * 10).toLong()) / 10.0
 
             events << createEvent(name: "power", value: powerFormatted, unit: "W")
             logInfo "Power: ${powerFormatted} W"
             break
 
         case "0505":  // RMS Voltage
-            def voltage = Integer.parseInt(value, 16) / 10.0
-            def voltageFormatted = voltage.round(1)
+            BigDecimal voltage = Integer.parseInt(value, 16) / 10.0
+            BigDecimal voltageFormatted = ((voltage * 10).toLong()) / 10.0
 
             events << createEvent(name: "voltage", value: voltageFormatted, unit: "V")
             logInfo "Voltage: ${voltageFormatted} V"
             break
 
         case "0508":  // RMS Current
-            def current = Integer.parseInt(value, 16) / 1000.0
-            def currentFormatted = current.round(3)
+            BigDecimal current = Integer.parseInt(value, 16) / 1000.0
+            BigDecimal currentFormatted = ((current * 1000).toLong()) / 1000.0
 
             events << createEvent(name: "amperage", value: currentFormatted, unit: "A")
             logInfo "Current: ${currentFormatted} A"
