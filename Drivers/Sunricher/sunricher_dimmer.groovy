@@ -376,25 +376,39 @@ def off() {
 
 // ==================== Level Commands ====================
 
-def setLevel(BigDecimal level, BigDecimal duration = null) {
-    def levelInt = level.intValue()
-    levelInt = Math.max(0, Math.min(100, levelInt))
+def setLevel(level, duration = null) {
+    // Convert to Integer using 'as Integer' pattern to avoid Groovy ambiguous method issues
+    Integer levelInt = level as Integer
+
+    // Use Groovy collection min/max to avoid Math.min/max ambiguity
+    levelInt = [[levelInt, 100].min(), 0].max()
 
     // Apply minimum brightness
-    def minLevel = (minBrightness ?: 1) as int
+    Integer minLevel = (minBrightness ?: 1) as Integer
     if (levelInt > 0 && levelInt < minLevel) {
         levelInt = minLevel
     }
 
-    // Convert percentage to 0-254
-    def zigbeeLevel = Math.round(levelInt * 2.54) as int
+    // Convert percentage to 0-254 (0xFE max)
+    Integer zigbeeLevel = levelInt == 0 ? 0 : [[((levelInt * 254 / 100) as Integer), 254].min(), 1].max()
 
-    // Get transition time (in 100ms units)
-    def trans = duration != null ? (duration * 10).intValue() : ((transitionTime ?: "10") as int)
+    // Get transition time in deciseconds (1/10 second units)
+    Integer transDeci = duration != null ? ((duration as BigDecimal) * 10).toInteger() : ((transitionTime ?: "10") as Integer)
 
-    logInfo "Setting level to ${levelInt}% (zigbee: ${zigbeeLevel}, transition: ${trans/10.0}s)"
+    // Format for zigbee command - level as hex, transition as little-endian 16-bit
+    String hexLevel = zigbee.convertToHexString(zigbeeLevel, 2)
+    String hexTrans = zigbee.swapOctets(zigbee.convertToHexString(transDeci, 4))
 
-    return zigbee.setLevel(zigbeeLevel, trans)
+    logInfo "Setting level to ${levelInt}% (zigbee: 0x${hexLevel}, transition: ${transDeci/10.0}s)"
+
+    // Use command 0x04 = Move to Level with On/Off (turns on if level > 0, off if level = 0)
+    if (levelInt == 0) {
+        // Turn off
+        return zigbee.off()
+    } else {
+        // Move to level with on/off - cluster 0x0008, command 0x04
+        return zigbee.command(CLUSTER_LEVEL, 0x04, [:], 0, "${hexLevel} ${hexTrans}")
+    }
 }
 
 def startLevelChange(String direction) {
@@ -413,9 +427,10 @@ def stopLevelChange() {
 
 // ==================== Custom Commands ====================
 
-def presetLevel(BigDecimal level) {
-    def levelInt = Math.max(1, Math.min(100, level.intValue()))
-    def zigbeeLevel = Math.round(levelInt * 2.54) as int
+def presetLevel(level) {
+    Integer levelInt = level as Integer
+    levelInt = [[levelInt, 100].min(), 1].max()
+    Integer zigbeeLevel = (levelInt * 2.54).toInteger()
 
     logInfo "Preset level to ${levelInt}% (will apply on next on)"
 
@@ -443,10 +458,11 @@ def setPowerOnBehavior(String behavior) {
     sendZigbeeCommands(cmds)
 }
 
-def setMinBrightness(BigDecimal level) {
-    level = Math.max(1, Math.min(50, level))
-    logInfo "Setting minimum brightness to ${level}%"
-    device.updateSetting("minBrightness", [value: level as int, type: "number"])
+def setMinBrightness(level) {
+    Integer levelInt = level as Integer
+    levelInt = [[levelInt, 50].min(), 1].max()
+    logInfo "Setting minimum brightness to ${levelInt}%"
+    device.updateSetting("minBrightness", [value: levelInt, type: "number"])
 }
 
 // ==================== Parse ====================
@@ -530,9 +546,9 @@ private List handleLevelCluster(String attrId, String value) {
     def events = []
 
     if (attrId == "0000") {  // Current Level
-        def zigbeeLevel = Integer.parseInt(value, 16)
-        def level = Math.round(zigbeeLevel / 2.54) as int
-        level = Math.min(100, Math.max(0, level))
+        Integer zigbeeLevel = Integer.parseInt(value, 16)
+        Integer level = (zigbeeLevel / 2.54).toInteger()
+        level = [[level, 100].min(), 0].max()
 
         events << createEvent(name: "level", value: level, unit: "%")
         logInfo "Level: ${level}%"
@@ -546,10 +562,10 @@ private List handleMeteringCluster(String attrId, String value) {
 
     switch(attrId) {
         case "0000":  // Current Summation
-            def rawValue = Long.parseLong(value, 16)
-            def divisor = state.energyDivisor ?: (energyDivisor ?: 3600000)
-            def energy = rawValue / divisor
-            def energyFormatted = Math.round(energy * 1000) / 1000.0
+            Long rawValue = Long.parseLong(value, 16)
+            BigDecimal divisor = state.energyDivisor ?: (energyDivisor ?: 3600000)
+            BigDecimal energy = rawValue / divisor
+            BigDecimal energyFormatted = (energy * 1000).toLong() / 1000.0
 
             events << createEvent(name: "energy", value: energyFormatted, unit: "kWh")
             logInfo "Energy: ${energyFormatted} kWh"
@@ -569,30 +585,30 @@ private List handleElectricalCluster(String attrId, String value) {
 
     switch(attrId) {
         case "050B":  // Active Power
-            def rawPower = Integer.parseInt(value, 16)
-            def divisor = state.powerDivisor ?: (powerDivisor ?: 10)
-            def power = rawPower / divisor
-            def powerFormatted = Math.round(power * 10) / 10.0
+            Integer rawPower = Integer.parseInt(value, 16)
+            BigDecimal divisor = state.powerDivisor ?: (powerDivisor ?: 10)
+            BigDecimal power = rawPower / divisor
+            BigDecimal powerFormatted = (power * 10).toLong() / 10.0
 
             events << createEvent(name: "power", value: powerFormatted, unit: "W")
             logInfo "Power: ${powerFormatted} W"
             break
 
         case "0505":  // RMS Voltage
-            def rawVoltage = Integer.parseInt(value, 16)
-            def divisor = state.voltageDivisor ?: (voltageDivisor ?: 10)
-            def voltage = rawVoltage / divisor
-            def voltageFormatted = Math.round(voltage * 10) / 10.0
+            Integer rawVoltage = Integer.parseInt(value, 16)
+            BigDecimal vDivisor = state.voltageDivisor ?: (voltageDivisor ?: 10)
+            BigDecimal voltage = rawVoltage / vDivisor
+            BigDecimal voltageFormatted = (voltage * 10).toLong() / 10.0
 
             events << createEvent(name: "voltage", value: voltageFormatted, unit: "V")
             logInfo "Voltage: ${voltageFormatted} V"
             break
 
         case "0508":  // RMS Current
-            def rawCurrent = Integer.parseInt(value, 16)
-            def divisor = state.currentDivisor ?: (currentDivisor ?: 1000)
-            def current = rawCurrent / divisor
-            def currentFormatted = Math.round(current * 1000) / 1000.0
+            Integer rawCurrent = Integer.parseInt(value, 16)
+            BigDecimal cDivisor = state.currentDivisor ?: (currentDivisor ?: 1000)
+            BigDecimal current = rawCurrent / cDivisor
+            BigDecimal currentFormatted = (current * 1000).toLong() / 1000.0
 
             events << createEvent(name: "amperage", value: currentFormatted, unit: "A")
             logInfo "Current: ${currentFormatted} A"

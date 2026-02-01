@@ -194,6 +194,46 @@ def applyClickMode() {
     setClickMode(defaultClickMode ?: "multi")
 }
 
+// ==================== Button Commands ====================
+// These are required by the PushableButton, HoldableButton, etc. capabilities
+// They allow testing buttons from the device page and automation triggers
+
+def push(buttonNumber) {
+    Integer btn = buttonNumber as Integer
+    btn = [[btn, 3].min(), 1].max()
+    def buttonName = (btn == 1) ? "left" : (btn == 2) ? "right" : "both"
+    logInfo "Button ${btn} (${buttonName}) pushed (virtual)"
+    sendEvent(name: "pushed", value: btn, isStateChange: true,
+              descriptionText: "Button ${btn} (${buttonName}) pushed (virtual)")
+}
+
+def hold(buttonNumber) {
+    Integer btn = buttonNumber as Integer
+    btn = [[btn, 3].min(), 1].max()
+    def buttonName = (btn == 1) ? "left" : (btn == 2) ? "right" : "both"
+    logInfo "Button ${btn} (${buttonName}) held (virtual)"
+    sendEvent(name: "held", value: btn, isStateChange: true,
+              descriptionText: "Button ${btn} (${buttonName}) held (virtual)")
+}
+
+def release(buttonNumber) {
+    Integer btn = buttonNumber as Integer
+    btn = [[btn, 3].min(), 1].max()
+    def buttonName = (btn == 1) ? "left" : (btn == 2) ? "right" : "both"
+    logInfo "Button ${btn} (${buttonName}) released (virtual)"
+    sendEvent(name: "released", value: btn, isStateChange: true,
+              descriptionText: "Button ${btn} (${buttonName}) released (virtual)")
+}
+
+def doubleTap(buttonNumber) {
+    Integer btn = buttonNumber as Integer
+    btn = [[btn, 3].min(), 1].max()
+    def buttonName = (btn == 1) ? "left" : (btn == 2) ? "right" : "both"
+    logInfo "Button ${btn} (${buttonName}) double-tapped (virtual)"
+    sendEvent(name: "doubleTapped", value: btn, isStateChange: true,
+              descriptionText: "Button ${btn} (${buttonName}) double-tapped (virtual)")
+}
+
 // ==================== Parse ====================
 
 def parse(String description) {
@@ -236,10 +276,10 @@ private List handleReadAttr(Map descMap) {
     switch(cluster) {
         case "0001":  // Power Configuration
             if (attrId == "0021") {  // Battery percentage
-                def battery = Integer.parseInt(value, 16)
+                Integer battery = Integer.parseInt(value, 16)
                 // Aqara reports 0-200 (0.5% steps)
-                battery = Math.round(battery / 2)
-                battery = Math.min(100, Math.max(0, battery))
+                battery = (battery / 2).toInteger()
+                battery = [[battery, 100].min(), 0].max()
                 events << createEvent(name: "battery", value: battery, unit: "%")
                 logInfo "Battery: ${battery}%"
             }
