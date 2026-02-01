@@ -108,6 +108,27 @@ Driver for Tuya-based 1-gang switches with power monitoring.
 
 ---
 
+#### Sunricher Zigbee Dimmer
+**Location:** `Drivers/Sunricher/sunricher_dimmer.groovy`
+
+Driver for Sunricher Zigbee dimmers with power monitoring.
+
+**Features:**
+- On/Off control
+- Dimming (0-100%) with transition time
+- Power monitoring (W)
+- Energy metering (kWh)
+- Voltage monitoring (V)
+- Current monitoring (A)
+- Power-on behavior (off/on/previous)
+- Minimum brightness setting
+- Preset level (set level without turning on)
+- Health check monitoring
+
+**Supported Models:** HK-SL-DIM-EU-A, HK-SL-DIM-US-A, HK-SL-DIM-AU-R-A (ZG2835RAC)
+
+---
+
 #### Zigbee Device Discovery Tool
 **Location:** `Drivers/zigbee-device-discovery.groovy`
 
@@ -162,6 +183,8 @@ hubitat/
 │   │   └── zigbee-sonoff-trvzb.groovy
 │   ├── Tuya/
 │   │   └── tuya_1gang_switch_power.groovy
+│   ├── Sunricher/
+│   │   └── sunricher_dimmer.groovy
 │   └── zigbee-device-discovery.groovy
 ├── Master Thermostat App/
 │   ├── hubitat-master-thermostat-parent.groovy
@@ -222,6 +245,10 @@ The following resources were used as references during development:
 #### Tuya Devices
 - [Zigbee2MQTT - Tuya TS0001](https://www.zigbee2mqtt.io/devices/TS0001.html) - Tuya switch documentation
 - [Nous B2Z Product Page](https://nous.technology/product/b2z.html) - Nous B2Z specifications
+
+#### Sunricher Devices
+- [Zigbee2MQTT - Sunricher Dimmer](https://www.zigbee2mqtt.io/devices/HK-SL-DIM-US-A.html) - Sunricher dimmer documentation
+- [Sunricher HK-SL-DIM-EU-A Support](https://github.com/Koenkk/zigbee2mqtt/issues/14315) - Device implementation details
 
 #### Hubitat Development
 - [Hubitat Developer Documentation](https://docs2.hubitat.com/en/developer) - Official Hubitat driver and app development guides
