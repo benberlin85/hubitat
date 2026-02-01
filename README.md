@@ -88,6 +88,26 @@ Simple, focused driver for the Aqara H1 Wireless Remote Switch (Double Rocker).
 
 ---
 
+#### Tuya/Zemismart 1-Gang Switch with Power Monitoring
+**Location:** `Drivers/Tuya/tuya_1gang_switch_power.groovy`
+
+Driver for Tuya-based 1-gang switches with power monitoring.
+
+**Features:**
+- On/Off control
+- Power monitoring (W)
+- Energy metering (kWh)
+- Voltage monitoring (V)
+- Current monitoring (A)
+- Power-on behavior (off/on/restore)
+- Countdown timer (auto-off)
+- Configurable polling intervals
+- Health check monitoring
+
+**Supported Models:** TS0001 / _TZ3000_qlai3277 (Zemismart, Nous B2Z)
+
+---
+
 #### Zigbee Device Discovery Tool
 **Location:** `Drivers/zigbee-device-discovery.groovy`
 
@@ -140,6 +160,8 @@ hubitat/
 │   │   └── aqara_h1_double_rocker_remote.groovy
 │   ├── Sonoff/
 │   │   └── zigbee-sonoff-trvzb.groovy
+│   ├── Tuya/
+│   │   └── tuya_1gang_switch_power.groovy
 │   └── zigbee-device-discovery.groovy
 ├── Master Thermostat App/
 │   ├── hubitat-master-thermostat-parent.groovy
@@ -196,6 +218,10 @@ The following resources were used as references during development:
 - [Aqara H1 Remote Support](https://github.com/Koenkk/zigbee-herdsman-converters/issues/2620) - Technical implementation details
 - [Blakadder Zigbee Database](https://zigbee.blakadder.com/) - Device compatibility information
 - Hubitat Generic Zigbee Switch driver - Base implementation reference
+
+#### Tuya Devices
+- [Zigbee2MQTT - Tuya TS0001](https://www.zigbee2mqtt.io/devices/TS0001.html) - Tuya switch documentation
+- [Nous B2Z Product Page](https://nous.technology/product/b2z.html) - Nous B2Z specifications
 
 #### Hubitat Development
 - [Hubitat Developer Documentation](https://docs2.hubitat.com/en/developer) - Official Hubitat driver and app development guides
