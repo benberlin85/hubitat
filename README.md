@@ -108,6 +108,40 @@ Driver for Tuya-based 1-gang switches with power monitoring.
 
 ---
 
+#### Tuya TS130F Curtain/Blind Motor
+**Location:** `Drivers/Tuya/tuya_ts130f_curtain_motor.groovy`
+
+Driver for Tuya TS130F curtain/blind motor controllers. Ideal for cinema screens and roller blinds.
+
+**Features:**
+- Open/Close/Stop control
+- Position control (0-100%)
+- **Invert open/close direction** (essential for cinema screens where "open" should lower the screen)
+- Configurable default open/close positions
+- Motor reversal command
+- Calibration mode support
+- Button Controller compatible (Open/Close/Stop)
+- Works with WindowShade, Switch, and SwitchLevel capabilities
+
+**Button Mapping:**
+- Button 1: Open (to default open position)
+- Button 2: Close (to default close position)
+- Button 3: Stop
+
+**Supported Models:** TS130F with various manufacturer codes:
+- _TZ3000_yruungrl
+- _TZ3000_vd43bbfq
+- _TZ3000_1dd0d5yi
+- _TZ3000_fccpjz5z
+- _TZ3000_zirycpws
+
+**Cinema Screen Setup:**
+1. Enable "Invert open/close direction"
+2. Set "Default open position" to the screen-down position (e.g., 5%)
+3. Set "Default close position" to the screen-up position (e.g., 100%)
+
+---
+
 #### Sunricher Zigbee Dimmer
 **Location:** `Drivers/Sunricher/sunricher_dimmer.groovy`
 
@@ -182,7 +216,8 @@ hubitat/
 │   ├── Sonoff/
 │   │   └── zigbee-sonoff-trvzb.groovy
 │   ├── Tuya/
-│   │   └── tuya_1gang_switch_power.groovy
+│   │   ├── tuya_1gang_switch_power.groovy
+│   │   └── tuya_ts130f_curtain_motor.groovy
 │   ├── Sunricher/
 │   │   └── sunricher_dimmer.groovy
 │   └── zigbee-device-discovery.groovy
@@ -244,6 +279,8 @@ The following resources were used as references during development:
 
 #### Tuya Devices
 - [Zigbee2MQTT - Tuya TS0001](https://www.zigbee2mqtt.io/devices/TS0001.html) - Tuya switch documentation
+- [Zigbee2MQTT - Tuya TS130F](https://www.zigbee2mqtt.io/devices/TS130F.html) - Tuya curtain/blind motor documentation
+- [Hubitat TS130F Discussion](https://community.hubitat.com/t/zigbee-cutain-module-ts130f/107907) - Community driver discussion
 - [Nous B2Z Product Page](https://nous.technology/product/b2z.html) - Nous B2Z specifications
 
 #### Sunricher Devices
