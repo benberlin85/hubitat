@@ -88,6 +88,31 @@ Simple, focused driver for the Aqara H1 Wireless Remote Switch (Double Rocker).
 
 ---
 
+#### Aqara Wall Outlet H2 EU
+**Location:** `Drivers/Aqara/aqara_wall_outlet_h2_eu.groovy`
+
+Comprehensive driver for the Aqara Wall Outlet H2 EU with power monitoring.
+
+**Features:**
+- On/Off control
+- Power monitoring (W)
+- Energy metering (kWh)
+- Voltage monitoring (V)
+- Current monitoring (A)
+- Device temperature monitoring
+- Overload protection (configurable 100-3840W)
+- Power outage memory (off/on/previous/inverted)
+- LED indicator control
+- Button/child lock
+- Charging protection (auto-off when charging complete)
+- Charging limit threshold (0.1-2W)
+- Power outage counter
+- Health check monitoring
+
+**Supported Models:** lumi.plug.aeu001 / WP-P01D
+
+---
+
 #### Tuya/Zemismart 1-Gang Switch with Power Monitoring
 **Location:** `Drivers/Tuya/tuya_1gang_switch_power.groovy`
 
@@ -212,7 +237,8 @@ hubitat/
 │   ├── Aqara/
 │   │   ├── aqara_h1_eu_single_switch.groovy
 │   │   ├── aqara_smart_plug_eu.groovy
-│   │   └── aqara_h1_double_rocker_remote.groovy
+│   │   ├── aqara_h1_double_rocker_remote.groovy
+│   │   └── aqara_wall_outlet_h2_eu.groovy
 │   ├── Sonoff/
 │   │   └── zigbee-sonoff-trvzb.groovy
 │   ├── Tuya/
@@ -274,6 +300,8 @@ The following resources were used as references during development:
 - [Zigbee2MQTT - Aqara H1 Remote](https://www.zigbee2mqtt.io/devices/WRS-R02.html) - Aqara H1 Double Rocker remote documentation
 - [Aqara Plug Random Toggle Issue](https://github.com/Koenkk/zigbee2mqtt/issues/13903) - Known firmware issue documentation
 - [Aqara H1 Remote Support](https://github.com/Koenkk/zigbee-herdsman-converters/issues/2620) - Technical implementation details
+- [Zigbee2MQTT - Aqara Wall Outlet H2 EU](https://www.zigbee2mqtt.io/devices/WP-P01D.html) - Aqara Wall Outlet H2 EU documentation
+- [Aqara Wall Outlet H2 Product Page](https://www.aqara.com/en/product/wall-outlet-h2-eu/) - Official product specifications
 - [Blakadder Zigbee Database](https://zigbee.blakadder.com/) - Device compatibility information
 - Hubitat Generic Zigbee Switch driver - Base implementation reference
 
