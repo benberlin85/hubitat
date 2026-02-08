@@ -32,7 +32,7 @@ import groovy.transform.Field
 
 // ==================== Constants ====================
 
-@Field static final String DRIVER_VERSION = "1.0.0"
+@Field static final String DRIVER_VERSION = "1.0.1"
 
 // Cluster IDs
 @Field static final int CLUSTER_BASIC = 0x0000
@@ -138,6 +138,12 @@ metadata {
 
         fingerprint manufacturer: "Aqara", model: "lumi.plug.aeu001",
                     deviceJoinName: "Aqara Wall Outlet H2 EU"
+
+        fingerprint manufacturer: "LUMI", model: "lumi.plug.aeu001",
+                    deviceJoinName: "Aqara Wall Outlet H2 EU"
+
+        fingerprint manufacturer: "aqara", model: "lumi.plug.aeu001",
+                    deviceJoinName: "Aqara Wall Outlet H2 EU"
     }
 
     preferences {
@@ -228,6 +234,12 @@ def configure() {
 
     def cmds = []
 
+    // Write Aqara "magic bytes" to enable device functionality
+    // This is required for Aqara devices to work properly with third-party hubs
+    // Write 0x01 to attribute 0xFFF0 on Lumi cluster to enable operation mode
+    cmds += zigbee.writeAttribute(CLUSTER_LUMI, 0xFFF0, 0x41, "00", [mfgCode: LUMI_MFG_CODE])
+    cmds += "delay 500"
+
     // Bind On/Off cluster
     cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0006 {${device.zigbeeId}} {}"
     cmds += "delay 500"
@@ -242,6 +254,10 @@ def configure() {
 
     // Bind Temperature cluster
     cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0402 {${device.zigbeeId}} {}"
+    cmds += "delay 500"
+
+    // Bind Lumi cluster for special reports
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0xFCC0 {${device.zigbeeId}} {}"
     cmds += "delay 500"
 
     // Configure On/Off reporting
@@ -276,6 +292,18 @@ def configure() {
     cmds += zigbee.readAttribute(CLUSTER_ELECTRICAL, ATTR_AC_CURRENT_DIVISOR)
     cmds += "delay 200"
     cmds += zigbee.readAttribute(CLUSTER_METERING, ATTR_METERING_DIVISOR)
+    cmds += "delay 500"
+
+    // Read Lumi-specific attributes
+    cmds += zigbee.readAttribute(CLUSTER_LUMI, ATTR_LUMI_POWER_ON_BEHAVIOR, [mfgCode: LUMI_MFG_CODE])
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(CLUSTER_LUMI, ATTR_LUMI_OVERLOAD_PROTECTION, [mfgCode: LUMI_MFG_CODE])
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(CLUSTER_LUMI, ATTR_LUMI_LED_INDICATOR, [mfgCode: LUMI_MFG_CODE])
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(CLUSTER_LUMI, ATTR_LUMI_BUTTON_LOCK, [mfgCode: LUMI_MFG_CODE])
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(CLUSTER_LUMI, ATTR_LUMI_POWER_OUTAGE_COUNT, [mfgCode: LUMI_MFG_CODE])
     cmds += "delay 500"
 
     // Initial refresh
@@ -367,6 +395,10 @@ def refresh() {
 
     // Temperature
     cmds += zigbee.readAttribute(CLUSTER_TEMPERATURE, ATTR_MEASURED_VALUE)
+    cmds += "delay 100"
+
+    // Read Lumi special report attribute (may contain power data)
+    cmds += zigbee.readAttribute(CLUSTER_LUMI, 0x00F7, [mfgCode: LUMI_MFG_CODE])
 
     return cmds
 }
@@ -728,83 +760,142 @@ private List handleLumiCluster(String attrId, String value, Map descMap) {
 
 /**
  * Parse Aqara F7 structured data (TLV format)
- * Tags: 0x03=temperature, 0x05=RSSI, 0x09=?, 0x0A=parent, 0x64=on/off, 0x65=on/off2
- *       0x95=power(float), 0x96=voltage, 0x97=current, 0x98=energy(float)
+ * Based on zigbee-herdsman-converters buffer2DataObject
+ *
+ * Data format: [tag][type][value...] repeating
+ * Types: 0x10=bool, 0x20=uint8, 0x21=uint16LE, 0x22=uint24LE, 0x23=uint32LE,
+ *        0x28=int8, 0x29=int16LE, 0x39=floatLE, 0x3A=doubleLE
+ *
+ * Tags: 0x01=battery, 0x03=temperature, 0x05=RSSI, 0x06=LQI, 0x09=?, 0x0A=parent,
+ *       0x0B=?, 0x0C=?, 0x0D=?, 0x11=?, 0x64=on/off, 0x65=on/off2
+ *       0x95=energy(float), 0x96=voltage, 0x97=current, 0x98=power(float)
  */
 private List parseAqaraF7Struct(String hexString) {
     def events = []
 
     if (!hexString || hexString.length() < 4) return events
 
-    logDebug "Parsing Aqara F7 struct: ${hexString}"
+    logDebug "Parsing Aqara F7 struct (${hexString.length()} chars): ${hexString}"
 
     try {
         int idx = 0
-        while (idx < hexString.length() - 4) {
+        while (idx < hexString.length() - 3) {
             // Get tag (1 byte = 2 hex chars)
             String tagHex = hexString.substring(idx, idx + 2)
             int tag = Integer.parseInt(tagHex, 16)
             idx += 2
 
             // Get data type (1 byte = 2 hex chars)
+            if (idx + 2 > hexString.length()) break
             String typeHex = hexString.substring(idx, idx + 2)
             int dataType = Integer.parseInt(typeHex, 16)
             idx += 2
 
-            // Parse value based on data type
-            def value = null
+            // Determine value length based on data type
             int valueLen = 0
-
             switch(dataType) {
-                case 0x10:  // Boolean
+                case 0x10:  // Boolean - 1 byte
                     valueLen = 2
-                    value = hexString.substring(idx, idx + valueLen) == "01"
                     break
-                case 0x20:  // Uint8
+                case 0x20:  // Uint8 - 1 byte
                     valueLen = 2
-                    value = Integer.parseInt(hexString.substring(idx, idx + valueLen), 16)
                     break
-                case 0x21:  // Uint16 (little-endian)
+                case 0x21:  // Uint16LE - 2 bytes
                     valueLen = 4
-                    value = littleEndianHexToInt(hexString.substring(idx, idx + valueLen))
                     break
-                case 0x23:  // Uint32 (little-endian)
+                case 0x22:  // Uint24LE - 3 bytes
+                    valueLen = 6
+                    break
+                case 0x23:  // Uint32LE - 4 bytes
                     valueLen = 8
-                    value = littleEndianHexToLong(hexString.substring(idx, idx + valueLen))
                     break
-                case 0x25:  // Uint48 (little-endian)
+                case 0x25:  // Uint48LE - 6 bytes
                     valueLen = 12
-                    value = littleEndianHexToLong(hexString.substring(idx, idx + valueLen))
                     break
-                case 0x28:  // Int8
+                case 0x28:  // Int8 - 1 byte
                     valueLen = 2
-                    value = hexToSignedInt(hexString.substring(idx, idx + valueLen))
                     break
-                case 0x29:  // Int16 (little-endian)
+                case 0x29:  // Int16LE - 2 bytes
                     valueLen = 4
-                    value = hexToSignedInt16LE(hexString.substring(idx, idx + valueLen))
                     break
-                case 0x39:  // Float (little-endian)
+                case 0x2B:  // Int32LE - 4 bytes
                     valueLen = 8
-                    value = littleEndianHexToFloat(hexString.substring(idx, idx + valueLen))
+                    break
+                case 0x39:  // FloatLE - 4 bytes
+                    valueLen = 8
+                    break
+                case 0x3A:  // DoubleLE - 8 bytes
+                    valueLen = 16
                     break
                 default:
-                    logDebug "Unknown data type: 0x${typeHex} at tag 0x${tagHex}"
-                    // Try to skip - assume 2 bytes
+                    logDebug "Unknown data type: 0x${typeHex} at tag 0x${tagHex}, pos ${idx}"
+                    // Try to continue by assuming 1 byte
                     valueLen = 2
                     break
             }
 
             if (idx + valueLen > hexString.length()) {
-                logDebug "Not enough data for tag 0x${tagHex}"
+                logDebug "Not enough data for tag 0x${tagHex} type 0x${typeHex}, need ${valueLen} chars at pos ${idx}"
                 break
             }
 
+            String valueHex = hexString.substring(idx, idx + valueLen)
             idx += valueLen
+
+            // Parse value based on data type
+            def value = null
+            switch(dataType) {
+                case 0x10:  // Boolean
+                    value = valueHex == "01"
+                    break
+                case 0x20:  // Uint8
+                    value = Integer.parseInt(valueHex, 16)
+                    break
+                case 0x21:  // Uint16LE
+                    value = littleEndianHexToInt(valueHex)
+                    break
+                case 0x22:  // Uint24LE
+                    value = littleEndianHexToInt(valueHex)
+                    break
+                case 0x23:  // Uint32LE
+                    value = littleEndianHexToLong(valueHex)
+                    break
+                case 0x25:  // Uint48LE
+                    value = littleEndianHexToLong(valueHex)
+                    break
+                case 0x28:  // Int8
+                    int v = Integer.parseInt(valueHex, 16)
+                    value = v > 127 ? v - 256 : v
+                    break
+                case 0x29:  // Int16LE
+                    value = hexToSignedInt16LE(valueHex)
+                    break
+                case 0x2B:  // Int32LE
+                    value = littleEndianHexToLong(valueHex)
+                    if (value > 2147483647L) value -= 4294967296L
+                    break
+                case 0x39:  // FloatLE
+                    value = littleEndianHexToFloat(valueHex)
+                    break
+                case 0x3A:  // DoubleLE
+                    value = littleEndianHexToDouble(valueHex)
+                    break
+                default:
+                    value = Integer.parseInt(valueHex, 16)
+                    break
+            }
+
+            logDebug "Tag 0x${tagHex} (${tag}), type 0x${typeHex}, raw=${valueHex}, value=${value}"
 
             // Process known tags
             switch(tag) {
-                case 0x03:  // Device temperature
+                case 0x01:  // Battery voltage (mV)
+                    if (value != null) {
+                        logDebug "Battery voltage: ${value} mV"
+                    }
+                    break
+
+                case 0x03:  // Device temperature (°C)
                     if (value != null) {
                         BigDecimal tempC = value as BigDecimal
                         BigDecimal temp = tempC
@@ -819,7 +910,45 @@ private List parseAqaraF7Struct(String hexString) {
                     }
                     break
 
-                case 0x64:  // On/Off state (endpoint 1)
+                case 0x05:  // RSSI / power outage count
+                    if (value != null) {
+                        // For plugs this is often power outage count (value - 1)
+                        int count = (value as Integer)
+                        if (count > 0) count -= 1
+                        events << createEvent(name: "powerOutageCount", value: count)
+                        logDebug "Power outage count: ${count}"
+                    }
+                    break
+
+                case 0x06:  // LQI
+                    logDebug "LQI: ${value}"
+                    break
+
+                case 0x09:  // Unknown - often seen
+                    logDebug "Tag 0x09: ${value}"
+                    break
+
+                case 0x0A:  // Parent network address
+                    logDebug "Parent address: 0x${String.format('%04X', value as Integer)}"
+                    break
+
+                case 0x0B:  // Unknown
+                    logDebug "Tag 0x0B: ${value}"
+                    break
+
+                case 0x0C:  // Unknown
+                    logDebug "Tag 0x0C: ${value}"
+                    break
+
+                case 0x0D:  // Unknown (often uint32)
+                    logDebug "Tag 0x0D: ${value}"
+                    break
+
+                case 0x11:  // Unknown (often uint32)
+                    logDebug "Tag 0x11: ${value}"
+                    break
+
+                case 0x64:  // On/Off state (100 decimal)
                     if (value != null) {
                         def switchState = (value == 1 || value == true) ? "on" : "off"
                         events << createEvent(name: "switch", value: switchState)
@@ -827,23 +956,32 @@ private List parseAqaraF7Struct(String hexString) {
                     }
                     break
 
-                case 0x95:  // Power (float, watts)
+                case 0x65:  // On/Off state 2 (101 decimal) - second endpoint
                     if (value != null) {
-                        BigDecimal power = value as BigDecimal
-                        power = ((power * 10).toLong()) / 10.0
-                        events << createEvent(name: "power", value: power, unit: "W")
-                        logInfo "Power: ${power} W"
+                        logDebug "Switch 2: ${value == 1 || value == true ? 'on' : 'off'}"
                     }
                     break
 
-                case 0x96:  // Voltage (millivolts or decivolts)
-                    if (value != null) {
+                case 0x95:  // Energy consumption (float, Wh)
+                    // Note: In zigbee-herdsman this is often energy, not power
+                    if (value != null && (value as BigDecimal) != 0) {
+                        BigDecimal energy = value as BigDecimal
+                        // Convert Wh to kWh
+                        energy = energy / 1000.0
+                        energy = ((energy * 1000).toLong()) / 1000.0
+                        events << createEvent(name: "energy", value: energy, unit: "kWh")
+                        logInfo "Energy: ${energy} kWh"
+                    }
+                    break
+
+                case 0x96:  // Voltage (uint16 in decivolts or float)
+                    if (value != null && (value as BigDecimal) != 0) {
                         BigDecimal voltage
-                        if (value > 1000) {
-                            // Millivolts
-                            voltage = (value as BigDecimal) / 1000.0
+                        if (dataType == 0x39) {
+                            // Float value - typically in 0.1V units
+                            voltage = (value as BigDecimal) / 10.0
                         } else {
-                            // Decivolts
+                            // Integer value in decivolts
                             voltage = (value as BigDecimal) / 10.0
                         }
                         voltage = ((voltage * 10).toLong()) / 10.0
@@ -852,39 +990,43 @@ private List parseAqaraF7Struct(String hexString) {
                     }
                     break
 
-                case 0x97:  // Current (milliamps)
-                    if (value != null) {
-                        BigDecimal current = (value as BigDecimal) / 1000.0
+                case 0x97:  // Current (uint16 in mA or float)
+                    if (value != null && (value as BigDecimal) != 0) {
+                        BigDecimal current
+                        if (dataType == 0x39) {
+                            // Float value
+                            current = value as BigDecimal
+                        } else {
+                            // Integer in milliamps
+                            current = (value as BigDecimal) / 1000.0
+                        }
                         current = ((current * 1000).toLong()) / 1000.0
                         events << createEvent(name: "amperage", value: current, unit: "A")
                         logInfo "Current: ${current} A"
                     }
                     break
 
-                case 0x98:  // Energy (float, kWh or Wh)
-                    if (value != null) {
-                        BigDecimal energy = value as BigDecimal
-                        // Some devices report in Wh, some in kWh
-                        if (energy > 1000) {
-                            energy = energy / 1000.0  // Convert Wh to kWh
-                        }
-                        energy = ((energy * 1000).toLong()) / 1000.0
-                        events << createEvent(name: "energy", value: energy, unit: "kWh")
-                        logInfo "Energy: ${energy} kWh"
+                case 0x98:  // Power (float, watts)
+                    if (value != null && (value as BigDecimal) != 0) {
+                        BigDecimal power = value as BigDecimal
+                        power = ((power * 10).toLong()) / 10.0
+                        events << createEvent(name: "power", value: power, unit: "W")
+                        logInfo "Power: ${power} W"
                     }
                     break
 
-                case 0x9A:  // Some status byte
+                case 0x9A:  // Overload status or other status byte
                     logDebug "Status 0x9A: ${value}"
                     break
 
                 default:
-                    logDebug "Unknown Aqara tag: 0x${String.format('%02X', tag)} = ${value}"
+                    logDebug "Unknown tag: 0x${String.format('%02X', tag)} = ${value}"
                     break
             }
         }
     } catch (e) {
-        logDebug "Error parsing Aqara F7 struct: ${e.message}"
+        logDebug "Error parsing Aqara F7 struct at position: ${e.message}"
+        log.error "Parse error: ${e}"
     }
 
     return events
@@ -893,13 +1035,42 @@ private List parseAqaraF7Struct(String hexString) {
 private List handleCatchall(Map descMap) {
     def events = []
 
-    if (descMap.clusterId == "0006" && descMap.command == "0B") {
+    String clusterId = descMap.clusterId?.toUpperCase()
+
+    if (clusterId == "0006" && descMap.command == "0B") {
         if (descMap.data?.size() > 0) {
             def cmd = descMap.data[0]
             if (cmd == "01") {
                 events << createEvent(name: "switch", value: "on")
             } else if (cmd == "00") {
                 events << createEvent(name: "switch", value: "off")
+            }
+        }
+    }
+
+    // Handle Lumi cluster catchall with attribute data
+    if (clusterId == "FCC0") {
+        logDebug "Lumi catchall: command=${descMap.command}, data=${descMap.data}"
+
+        // Check if this is an attribute report with data
+        if (descMap.data && descMap.data.size() >= 4) {
+            // Try to extract attribute ID and value from catchall data
+            // Format may be: [attrIdLo, attrIdHi, dataType, ...value...]
+            try {
+                int attrIdLo = Integer.parseInt(descMap.data[0], 16)
+                int attrIdHi = Integer.parseInt(descMap.data[1], 16)
+                int attrId = (attrIdHi << 8) | attrIdLo
+
+                if (attrId == 0x00F7) {
+                    // Build the hex string from remaining data bytes
+                    String hexData = descMap.data.drop(3).join("")
+                    if (hexData) {
+                        logDebug "Catchall F7 data: ${hexData}"
+                        events += parseAqaraF7Struct(hexData)
+                    }
+                }
+            } catch (e) {
+                logDebug "Error parsing Lumi catchall: ${e.message}"
             }
         }
     }
@@ -961,10 +1132,18 @@ private long littleEndianHexToLong(String hex) {
 }
 
 private float littleEndianHexToFloat(String hex) {
-    if (!hex || hex.length() != 8) return 0.0
+    if (!hex || hex.length() != 8) return 0.0f
     // Swap to big-endian
     String be = hex.substring(6, 8) + hex.substring(4, 6) + hex.substring(2, 4) + hex.substring(0, 2)
-    return Float.intBitsToFloat(Integer.parseInt(be, 16))
+    return Float.intBitsToFloat(Integer.parseUnsignedInt(be, 16))
+}
+
+private double littleEndianHexToDouble(String hex) {
+    if (!hex || hex.length() != 16) return 0.0d
+    // Swap to big-endian (8 bytes = 16 hex chars)
+    String be = hex.substring(14, 16) + hex.substring(12, 14) + hex.substring(10, 12) + hex.substring(8, 10) +
+                hex.substring(6, 8) + hex.substring(4, 6) + hex.substring(2, 4) + hex.substring(0, 2)
+    return Double.longBitsToDouble(Long.parseUnsignedLong(be, 16))
 }
 
 private String floatToHex(float value) {
