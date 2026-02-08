@@ -32,7 +32,7 @@ import groovy.transform.Field
 
 // ==================== Constants ====================
 
-@Field static final String DRIVER_VERSION = "1.0.1"
+@Field static final String DRIVER_VERSION = "1.0.2"
 
 // Cluster IDs
 @Field static final int CLUSTER_BASIC = 0x0000
@@ -521,25 +521,66 @@ def resetEnergy() {
 // ==================== Parse ====================
 
 def parse(String description) {
-    logDebug "Parse: $description"
+    // Always log to info for debugging - can see even if debug is off
+    log.info "${device.displayName}: Parse received: ${description?.take(100)}..."
 
     updateLastActivity()
 
     def events = []
 
+    if (!description) {
+        logWarn "Empty description received"
+        return events
+    }
+
     try {
+        def descMap = null
+
+        // Handle different description formats
         if (description.startsWith("read attr -")) {
-            def descMap = zigbee.parseDescriptionAsMap(description)
-            logDebug "Read attr: $descMap"
-            events += handleReadAttr(descMap)
+            logDebug "Parsing read attr message"
+            descMap = zigbee.parseDescriptionAsMap(description)
+        } else if (description.startsWith("catchall:")) {
+            logDebug "Parsing catchall message"
+            descMap = zigbee.parseDescriptionAsMap(description)
+        } else {
+            // Try to parse anyway - some messages have different formats
+            logDebug "Trying to parse unknown format: ${description.take(50)}"
+            try {
+                descMap = zigbee.parseDescriptionAsMap(description)
+            } catch (e2) {
+                logDebug "Could not parse: ${e2.message}"
+            }
         }
-        else if (description.startsWith("catchall:")) {
-            def descMap = zigbee.parseDescriptionAsMap(description)
-            logDebug "Catchall: $descMap"
-            events += handleCatchall(descMap)
+
+        if (descMap) {
+            log.info "${device.displayName}: Parsed - cluster=${descMap.cluster}, attr=${descMap.attrId}, enc=${descMap.encoding}"
+
+            if (descMap.cluster) {
+                events += handleReadAttr(descMap)
+            }
+
+            // Check for additional attributes (some Zigbee messages contain multiple attrs)
+            if (descMap.additionalAttrs) {
+                descMap.additionalAttrs.each { addAttr ->
+                    logDebug "Additional attr: ${addAttr}"
+                    def additionalMap = [:]
+                    additionalMap.putAll(descMap)
+                    additionalMap.attrId = addAttr.attrId
+                    additionalMap.value = addAttr.value
+                    additionalMap.encoding = addAttr.encoding
+                    events += handleReadAttr(additionalMap)
+                }
+            }
+        } else {
+            logWarn "Could not parse description into map"
         }
     } catch (e) {
-        logWarn "Parse error: ${e.message}"
+        log.error "${device.displayName}: Parse error: ${e.message}", e
+    }
+
+    if (events) {
+        log.info "${device.displayName}: Generated ${events.size()} events"
     }
 
     return events
@@ -708,7 +749,11 @@ private List handleLumiCluster(String attrId, String value, Map descMap) {
             break
 
         case "00F7":  // Aqara structured data - contains power, voltage, temperature, etc.
-            events += parseAqaraF7Struct(value)
+        case "F7":    // Sometimes attrId comes without leading zeros
+            logDebug "Processing F7 struct data (encoding=${descMap?.encoding}): ${value?.take(60)}..."
+            if (value && value.length() >= 4) {
+                events += parseAqaraF7Struct(value)
+            }
             break
 
         case "FFF2":  // Aqara time sync / heartbeat data
@@ -773,9 +818,13 @@ private List handleLumiCluster(String attrId, String value, Map descMap) {
 private List parseAqaraF7Struct(String hexString) {
     def events = []
 
-    if (!hexString || hexString.length() < 4) return events
+    if (!hexString || hexString.length() < 4) {
+        log.warn "${device.displayName}: F7 struct too short: ${hexString}"
+        return events
+    }
 
-    logDebug "Parsing Aqara F7 struct (${hexString.length()} chars): ${hexString}"
+    log.info "${device.displayName}: Parsing Aqara F7 struct (${hexString.length()} chars)"
+    logDebug "F7 data: ${hexString}"
 
     try {
         int idx = 0
