@@ -32,7 +32,7 @@ import groovy.transform.Field
 
 // ==================== Constants ====================
 
-@Field static final String DRIVER_VERSION = "1.0.4"
+@Field static final String DRIVER_VERSION = "1.0.5"
 
 // Cluster IDs
 @Field static final int CLUSTER_BASIC = 0x0000
@@ -1064,28 +1064,36 @@ private List handleCatchall(Map descMap) {
 
     // Handle On/Off cluster responses
     if (clusterId == "0006") {
+        log.info "${device.displayName}: On/Off catchall - cmd=${command}, data=${descMap.data}"
+
         if (command == "0B" && descMap.data?.size() > 0) {
-            // Default response - check the command that was responded to
+            // Default response - data[0] is the command that was acknowledged
             def cmd = descMap.data[0]
-            if (cmd == "01") {
-                events << createEvent(name: "switch", value: "on")
-                logInfo "Switch: on (from response)"
-            } else if (cmd == "00") {
-                events << createEvent(name: "switch", value: "off")
-                logInfo "Switch: off (from response)"
-            }
-        } else if (command == "01" && descMap.data?.size() >= 3) {
+            def switchValue = (cmd == "01") ? "on" : "off"
+            log.info "${device.displayName}: Switch command ${cmd} acknowledged -> ${switchValue}"
+            events << createEvent(name: "switch", value: switchValue, descriptionText: "${device.displayName} is ${switchValue}")
+        } else if (command == "01" && descMap.data?.size() >= 5) {
             // Read attribute response
             // Data format: [attrIdLo, attrIdHi, status, dataType, value...]
             try {
-                if (descMap.data.size() >= 5 && descMap.data[2] == "00") {
-                    // Success status
-                    def switchValue = descMap.data[4] == "01" ? "on" : "off"
-                    events << createEvent(name: "switch", value: switchValue)
-                    logInfo "Switch: ${switchValue}"
+                if (descMap.data[2] == "00") {
+                    // Success status - data[4] is the value
+                    def switchValue = (descMap.data[4] == "01") ? "on" : "off"
+                    log.info "${device.displayName}: Switch read response -> ${switchValue}"
+                    events << createEvent(name: "switch", value: switchValue, descriptionText: "${device.displayName} is ${switchValue}")
                 }
             } catch (e) {
                 logDebug "Error parsing on/off catchall: ${e.message}"
+            }
+        } else if (command == "0A" && descMap.data?.size() >= 3) {
+            // Attribute report (unsolicited)
+            // Data format: [attrIdLo, attrIdHi, dataType, value]
+            try {
+                def switchValue = (descMap.data[3] == "01") ? "on" : "off"
+                log.info "${device.displayName}: Switch report -> ${switchValue}"
+                events << createEvent(name: "switch", value: switchValue, descriptionText: "${device.displayName} is ${switchValue}")
+            } catch (e) {
+                logDebug "Error parsing on/off report: ${e.message}"
             }
         }
     }
