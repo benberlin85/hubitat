@@ -4,7 +4,7 @@
  *  A diagnostic driver that discovers all endpoints, clusters, and attributes
  *  from any Zigbee device to help create custom drivers.
  *
- *  Version: 1.0.0
+ *  Version: 1.1.0 - Added Aqara switch testing capabilities
  *
  *  Instructions:
  *  1. Change your device to use this driver
@@ -12,18 +12,25 @@
  *  3. Wake up your device (press a button on it)
  *  4. Wait and check the logs
  *  5. Copy the discovery results to create a proper driver
+ *
+ *  For Aqara devices:
+ *  - Use "Test Aqara Switch" to test On/Off on different endpoints
+ *  - Use "Read Aqara FCC0" to read proprietary cluster
+ *  - Use "Send Aqara Magic" to initialize device for third-party hub
  */
 
 metadata {
     definition (name: "Zigbee Device Discovery Tool", namespace: "custom", author: "Custom") {
         capability "Configuration"
         capability "Refresh"
+        capability "Switch"  // Add switch capability for testing
 
         attribute "discoveryStatus", "string"
         attribute "lastMessage", "string"
         attribute "deviceModel", "string"
         attribute "deviceManufacturer", "string"
         attribute "messageCount", "number"
+        attribute "lastSwitchResponse", "string"
 
         command "discoverDevice"
         command "discoverBasicInfo"
@@ -34,10 +41,24 @@ metadata {
         command "readAllCommonClusters"
         command "clearResults"
         command "testCommunication"
+
+        // Aqara-specific commands
+        command "testAqaraSwitchOn"
+        command "testAqaraSwitchOff"
+        command "testSwitchEndpoint1"
+        command "testSwitchEndpoint2"
+        command "testSwitchEndpoint15"
+        command "readAqaraFCC0"
+        command "sendAqaraMagicBytes"
+        command "discoverAllEndpointClusters"
+        command "readOnOffCluster"
+        command "testRawOnCommand"
+        command "testRawOffCommand"
     }
 
     preferences {
         input name: "logEnable", type: "bool", title: "Enable logging", defaultValue: true
+        input name: "testEndpoint", type: "enum", title: "Test Endpoint", options: ["01", "02", "03", "15", "F2"], defaultValue: "01"
     }
 }
 
@@ -352,6 +373,290 @@ def readAllCommonClusters() {
     return cmds
 }
 
+// ==================== SWITCH CONTROL (for testing) ====================
+
+def on() {
+    log.info "=".multiply(60)
+    log.info "SWITCH ON COMMAND"
+    log.info "=".multiply(60)
+    testAqaraSwitchOn()
+}
+
+def off() {
+    log.info "=".multiply(60)
+    log.info "SWITCH OFF COMMAND"
+    log.info "=".multiply(60)
+    testAqaraSwitchOff()
+}
+
+// ==================== AQARA SPECIFIC COMMANDS ====================
+
+def testAqaraSwitchOn() {
+    def ep = settings?.testEndpoint ?: "01"
+    log.info "=".multiply(60)
+    log.info "TESTING AQARA SWITCH ON - Endpoint ${ep}"
+    log.info "=".multiply(60)
+    log.info "Sending multiple ON command formats..."
+
+    def cmds = []
+
+    // Standard ZCL On command
+    log.info "1. Standard zigbee.on() to endpoint ${ep}"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x01 {}"
+    cmds += "delay 500"
+
+    // Read back the state
+    log.info "2. Reading back On/Off state..."
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x0000 {}"
+    cmds += "delay 500"
+
+    // Also try toggle command
+    log.info "3. Trying toggle command..."
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x02 {}"
+
+    return cmds
+}
+
+def testAqaraSwitchOff() {
+    def ep = settings?.testEndpoint ?: "01"
+    log.info "=".multiply(60)
+    log.info "TESTING AQARA SWITCH OFF - Endpoint ${ep}"
+    log.info "=".multiply(60)
+
+    def cmds = []
+
+    // Standard ZCL Off command
+    log.info "1. Standard zigbee.off() to endpoint ${ep}"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x00 {}"
+    cmds += "delay 500"
+
+    // Read back the state
+    log.info "2. Reading back On/Off state..."
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x0000 {}"
+
+    return cmds
+}
+
+def testSwitchEndpoint1() {
+    log.info "Testing ON/OFF on Endpoint 01"
+    def cmds = []
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x01 0x0006 0x01 {}"
+    cmds += "delay 2000"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x01 0x0006 0x00 {}"
+    return cmds
+}
+
+def testSwitchEndpoint2() {
+    log.info "Testing ON/OFF on Endpoint 02"
+    def cmds = []
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x02 0x0006 0x01 {}"
+    cmds += "delay 2000"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x02 0x0006 0x00 {}"
+    return cmds
+}
+
+def testSwitchEndpoint15() {
+    log.info "Testing ON/OFF on Endpoint 15 (0x15 = 21 decimal)"
+    def cmds = []
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x15 0x0006 0x01 {}"
+    cmds += "delay 2000"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x15 0x0006 0x00 {}"
+    return cmds
+}
+
+def testRawOnCommand() {
+    log.info "=".multiply(60)
+    log.info "SENDING RAW ON COMMANDS TO ALL LIKELY ENDPOINTS"
+    log.info "=".multiply(60)
+
+    def cmds = []
+
+    // Try endpoint 1
+    log.info "Endpoint 01: ON"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x01 0x0006 0x01 {}"
+    cmds += "delay 1000"
+
+    // Try endpoint 2
+    log.info "Endpoint 02: ON"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x02 0x0006 0x01 {}"
+    cmds += "delay 1000"
+
+    // Try endpoint 21 (0x15) - common for Aqara
+    log.info "Endpoint 15 (0x15=21): ON"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x15 0x0006 0x01 {}"
+    cmds += "delay 1000"
+
+    // Try endpoint 242 (0xF2) - sometimes used
+    log.info "Endpoint F2 (242): ON"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0xF2 0x0006 0x01 {}"
+
+    return cmds
+}
+
+def testRawOffCommand() {
+    log.info "=".multiply(60)
+    log.info "SENDING RAW OFF COMMANDS TO ALL LIKELY ENDPOINTS"
+    log.info "=".multiply(60)
+
+    def cmds = []
+
+    // Try endpoint 1
+    log.info "Endpoint 01: OFF"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x01 0x0006 0x00 {}"
+    cmds += "delay 1000"
+
+    // Try endpoint 2
+    log.info "Endpoint 02: OFF"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x02 0x0006 0x00 {}"
+    cmds += "delay 1000"
+
+    // Try endpoint 21 (0x15)
+    log.info "Endpoint 15 (0x15=21): OFF"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x15 0x0006 0x00 {}"
+    cmds += "delay 1000"
+
+    // Try endpoint 242 (0xF2)
+    log.info "Endpoint F2 (242): OFF"
+    cmds += "he cmd 0x${device.deviceNetworkId} 0xF2 0x0006 0x00 {}"
+
+    return cmds
+}
+
+def readAqaraFCC0() {
+    log.info "=".multiply(60)
+    log.info "READING AQARA FCC0 CLUSTER ATTRIBUTES"
+    log.info "=".multiply(60)
+
+    def cmds = []
+
+    // Read common Aqara FCC0 attributes
+    log.info "Reading FCC0 attribute 0x00F7 (TLV data)..."
+    cmds += zigbee.readAttribute(0xFCC0, 0x00F7, [mfgCode: "0x115F"])
+    cmds += "delay 500"
+
+    log.info "Reading FCC0 attribute 0x0009 (device mode)..."
+    cmds += zigbee.readAttribute(0xFCC0, 0x0009, [mfgCode: "0x115F"])
+    cmds += "delay 500"
+
+    log.info "Reading FCC0 attribute 0x0200 (operation mode)..."
+    cmds += zigbee.readAttribute(0xFCC0, 0x0200, [mfgCode: "0x115F"])
+    cmds += "delay 500"
+
+    log.info "Reading FCC0 attribute 0x0201 (power outage memory)..."
+    cmds += zigbee.readAttribute(0xFCC0, 0x0201, [mfgCode: "0x115F"])
+    cmds += "delay 500"
+
+    log.info "Reading FCC0 attribute 0x0202 (startup on/off)..."
+    cmds += zigbee.readAttribute(0xFCC0, 0x0202, [mfgCode: "0x115F"])
+    cmds += "delay 500"
+
+    log.info "Reading FCC0 attribute 0x0207 (switch type)..."
+    cmds += zigbee.readAttribute(0xFCC0, 0x0207, [mfgCode: "0x115F"])
+    cmds += "delay 500"
+
+    // Also try reading without mfgCode
+    log.info "Reading FCC0 attribute 0x00F7 (without mfgCode)..."
+    cmds += zigbee.readAttribute(0xFCC0, 0x00F7)
+
+    return cmds
+}
+
+def sendAqaraMagicBytes() {
+    log.info "=".multiply(60)
+    log.info "SENDING AQARA MAGIC BYTES FOR THIRD-PARTY HUB ACTIVATION"
+    log.info "=".multiply(60)
+    log.info "These commands help Aqara devices work with non-Aqara hubs"
+
+    def cmds = []
+
+    // Write to FCC0 cluster, attribute 0x0009 to enable device
+    log.info "1. Writing magic byte to FCC0:0x0009..."
+    cmds += zigbee.writeAttribute(0xFCC0, 0x0009, 0x20, 0x01, [mfgCode: "0x115F"])
+    cmds += "delay 500"
+
+    // Aqara specific binding sometimes needed
+    log.info "2. Binding On/Off cluster..."
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0006 {${device.zigbeeId}} {}"
+    cmds += "delay 500"
+
+    // Bind electrical measurement
+    log.info "3. Binding Electrical Measurement cluster..."
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0B04 {${device.zigbeeId}} {}"
+    cmds += "delay 500"
+
+    // Bind metering
+    log.info "4. Binding Metering cluster..."
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0702 {${device.zigbeeId}} {}"
+    cmds += "delay 500"
+
+    // Configure reporting for On/Off
+    log.info "5. Configuring On/Off reporting..."
+    cmds += zigbee.configureReporting(0x0006, 0x0000, 0x10, 0, 3600, null)
+    cmds += "delay 500"
+
+    // Read back device state
+    log.info "6. Reading device state..."
+    cmds += zigbee.readAttribute(0x0006, 0x0000)
+
+    return cmds
+}
+
+def readOnOffCluster() {
+    log.info "=".multiply(60)
+    log.info "READING ON/OFF CLUSTER FROM ALL ENDPOINTS"
+    log.info "=".multiply(60)
+
+    def cmds = []
+
+    // Read from multiple endpoints
+    ["01", "02", "15", "F2"].each { ep ->
+        log.info "Reading On/Off from endpoint ${ep}..."
+        cmds += "he rattr 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x0000 {}"
+        cmds += "delay 300"
+    }
+
+    // Also read cluster attributes list
+    log.info "Discovering On/Off cluster attributes..."
+    cmds += zigbee.readAttribute(0x0006, 0x0000)  // OnOff
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(0x0006, 0x4000)  // GlobalSceneControl
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(0x0006, 0x4001)  // OnTime
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(0x0006, 0x4002)  // OffWaitTime
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(0x0006, 0x4003)  // StartUpOnOff
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(0x0006, 0x8000)  // Aqara custom?
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(0x0006, 0x8001)  // Aqara custom?
+    cmds += "delay 200"
+    cmds += zigbee.readAttribute(0x0006, 0x8002)  // Aqara custom?
+
+    return cmds
+}
+
+def discoverAllEndpointClusters() {
+    log.info "=".multiply(60)
+    log.info "DISCOVERING CLUSTERS ON ALL ENDPOINTS (1, 2, 21, 242)"
+    log.info "=".multiply(60)
+
+    def cmds = []
+
+    // Request simple descriptor for common Aqara endpoints
+    ["01", "02", "15", "F2"].each { ep ->
+        log.info "Requesting Simple Descriptor for endpoint ${ep}..."
+        cmds += "he raw 0x${device.deviceNetworkId} 0 0 0x0004 {00 ${zigbee.swapOctets(device.deviceNetworkId)} ${ep}} {0x0000}"
+        cmds += "delay 500"
+    }
+
+    // Also request active endpoints
+    log.info "Requesting Active Endpoints list..."
+    cmds += "he raw 0x${device.deviceNetworkId} 0 0 0x0005 {00 ${zigbee.swapOctets(device.deviceNetworkId)}} {0x0000}"
+
+    return cmds
+}
+
 // ==================== Parse ====================
 
 def parse(String description) {
@@ -368,6 +673,10 @@ def parse(String description) {
     def result = []
 
     try {
+        // Parse the description to get map
+        def descMap = zigbee.parseDescriptionAsMap(description)
+        log.info "Parsed Map: ${descMap}"
+
         if (description.startsWith("read attr -")) {
             result = parseReadAttr(description)
         }
@@ -375,15 +684,180 @@ def parse(String description) {
             result = parseCatchall(description)
         }
         else {
-            log.info "Other message type: ${description}"
+            log.info "Other message type detected"
+            // Still try to parse it
+            if (descMap) {
+                def cluster = descMap.cluster ?: descMap.clusterId
+                def command = descMap.command
+                def data = descMap.data
+                def endpoint = descMap.endpoint ?: descMap.sourceEndpoint
+
+                log.info "-".multiply(50)
+                log.info "Generic Message Details:"
+                log.info "  Endpoint: ${endpoint}"
+                log.info "  Cluster: ${cluster} (${CLUSTER_NAMES[cluster?.toUpperCase()] ?: 'Unknown'})"
+                log.info "  Command: ${command}"
+                log.info "  Data: ${data}"
+                log.info "-".multiply(50)
+
+                // Check for On/Off cluster responses
+                if (cluster == "0006" || cluster == "6") {
+                    log.warn "*** ON/OFF CLUSTER RESPONSE DETECTED ***"
+                    if (descMap.attrId == "0000" || data?.size() > 0) {
+                        def onOff = descMap.value ?: (data ? data[0] : "unknown")
+                        log.warn "*** SWITCH STATE: ${onOff == "01" || onOff == "1" ? "ON" : "OFF"} (raw: ${onOff}) ***"
+                        sendEvent(name: "lastSwitchResponse", value: "Cluster 0006, State: ${onOff}")
+                        sendEvent(name: "switch", value: (onOff == "01" || onOff == "1") ? "on" : "off")
+                    }
+                }
+
+                // Check for FCC0 cluster (Aqara)
+                if (cluster?.toUpperCase() == "FCC0") {
+                    log.warn "*** AQARA FCC0 CLUSTER MESSAGE ***"
+                    parseAqaraFCC0(descMap)
+                }
+            }
         }
     } catch (e) {
         log.error "Parse error: ${e.message}"
+        log.error "Stack: ${e.getStackTrace()}"
     }
 
     sendEvent(name: "discoveryStatus", value: "Receiving data...")
 
     return result
+}
+
+// Parse Aqara FCC0 cluster data
+private void parseAqaraFCC0(Map descMap) {
+    log.info "=".multiply(50)
+    log.info "AQARA FCC0 CLUSTER DATA"
+    log.info "=".multiply(50)
+
+    def attrId = descMap.attrId
+    def value = descMap.value
+    def data = descMap.data
+
+    log.info "Attribute ID: ${attrId}"
+    log.info "Value: ${value}"
+    log.info "Data array: ${data}"
+
+    // If this is the F7 TLV attribute
+    if (attrId == "00F7" && value) {
+        log.info "Parsing F7 TLV structure..."
+        parseF7TLVData(value)
+    }
+
+    log.info "=".multiply(50)
+}
+
+// Parse the Aqara F7 TLV data format
+private void parseF7TLVData(String hexData) {
+    log.info "F7 TLV Raw Data: ${hexData}"
+    log.info "F7 TLV Length: ${hexData.length() / 2} bytes"
+
+    // Convert hex string to byte array
+    def bytes = []
+    for (int i = 0; i < hexData.length(); i += 2) {
+        bytes << Integer.parseInt(hexData.substring(i, i + 2), 16)
+    }
+
+    log.info "Bytes: ${bytes.collect { String.format('%02X', it) }.join(' ')}"
+
+    // Parse TLV structure
+    int idx = 0
+    while (idx < bytes.size() - 2) {
+        def tag = bytes[idx]
+        def type = bytes[idx + 1]
+        idx += 2
+
+        def tagHex = String.format('%02X', tag)
+        def typeHex = String.format('%02X', type)
+
+        log.info "Tag: 0x${tagHex}, Type: 0x${typeHex}"
+
+        // Determine value length based on type
+        def valueLen = 0
+        switch (type) {
+            case 0x10: valueLen = 1; break  // Boolean
+            case 0x20: valueLen = 1; break  // Uint8
+            case 0x21: valueLen = 2; break  // Uint16
+            case 0x23: valueLen = 4; break  // Uint32
+            case 0x28: valueLen = 1; break  // Int8
+            case 0x29: valueLen = 2; break  // Int16
+            case 0x39: valueLen = 4; break  // Float
+            default:
+                log.warn "Unknown type 0x${typeHex} at index ${idx}"
+                return
+        }
+
+        if (idx + valueLen > bytes.size()) {
+            log.warn "Not enough data for value"
+            return
+        }
+
+        // Read value (little-endian)
+        def rawBytes = bytes[idx..<(idx + valueLen)]
+        idx += valueLen
+
+        // Interpret value based on tag
+        def value = interpretF7Value(tag, type, rawBytes)
+        log.info "  Tag 0x${tagHex}: ${value}"
+
+        // Store specific values
+        switch (tag) {
+            case 0x03:  // Temperature
+                log.warn "*** TEMPERATURE: ${value}°C ***"
+                break
+            case 0x64:  // On/Off state
+                log.warn "*** SWITCH STATE (from F7): ${value ? 'ON' : 'OFF'} ***"
+                break
+            case 0x95:  // Energy
+                log.warn "*** ENERGY: ${value} kWh ***"
+                break
+            case 0x96:  // Voltage
+                log.warn "*** VOLTAGE: ${value} V ***"
+                break
+            case 0x97:  // Current
+                log.warn "*** CURRENT: ${value} A ***"
+                break
+            case 0x98:  // Power
+                log.warn "*** POWER: ${value} W ***"
+                break
+        }
+    }
+}
+
+private interpretF7Value(int tag, int type, List<Integer> bytes) {
+    switch (type) {
+        case 0x10:  // Boolean
+            return bytes[0] != 0
+
+        case 0x20:  // Uint8
+            return bytes[0]
+
+        case 0x21:  // Uint16 LE
+            return bytes[0] + (bytes[1] << 8)
+
+        case 0x23:  // Uint32 LE
+            long val = bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24)
+            return val
+
+        case 0x28:  // Int8
+            def v = bytes[0]
+            return v > 127 ? v - 256 : v
+
+        case 0x29:  // Int16 LE
+            def v = bytes[0] + (bytes[1] << 8)
+            return v > 32767 ? v - 65536 : v
+
+        case 0x39:  // Float LE
+            int bits = bytes[0] + (bytes[1] << 8) + (bytes[2] << 16) + (bytes[3] << 24)
+            return Float.intBitsToFloat(bits)
+
+        default:
+            return "raw: ${bytes.collect { String.format('%02X', it) }.join('')}"
+    }
 }
 
 private List parseReadAttr(String description) {
@@ -393,13 +867,15 @@ private List parseReadAttr(String description) {
     def attrId = descMap.attrId
     def value = descMap.value
     def encoding = descMap.encoding
+    def endpoint = descMap.endpoint ?: descMap.sourceEndpoint ?: "01"
 
-    def clusterName = CLUSTER_NAMES[cluster] ?: "Unknown (${cluster})"
+    def clusterName = CLUSTER_NAMES[cluster?.toUpperCase()] ?: "Unknown (${cluster})"
     def dataType = DATA_TYPES[encoding] ?: encoding
 
     log.info "-".multiply(50)
     log.info "ATTRIBUTE READ RESPONSE"
     log.info "-".multiply(50)
+    log.info "Endpoint: ${endpoint}"
     log.info "Cluster: 0x${cluster} (${clusterName})"
     log.info "Attribute: 0x${attrId}"
     log.info "Data Type: ${dataType}"
@@ -411,6 +887,29 @@ private List parseReadAttr(String description) {
         log.info "Decoded Value: ${decodedValue}"
     }
 
+    // Special handling for On/Off cluster
+    if (cluster?.toUpperCase() == "0006" && attrId == "0000") {
+        def onOff = (value == "01" || value == "1") ? "on" : "off"
+        log.warn "=".multiply(50)
+        log.warn "*** ON/OFF STATE FROM ENDPOINT ${endpoint}: ${onOff.toUpperCase()} ***"
+        log.warn "=".multiply(50)
+        sendEvent(name: "switch", value: onOff)
+        sendEvent(name: "lastSwitchResponse", value: "EP${endpoint}: ${onOff}")
+    }
+
+    // Special handling for FCC0 cluster (Aqara)
+    if (cluster?.toUpperCase() == "FCC0") {
+        log.warn "=".multiply(50)
+        log.warn "*** AQARA FCC0 ATTRIBUTE RESPONSE ***"
+        log.warn "=".multiply(50)
+
+        if (attrId == "00F7" && value) {
+            parseF7TLVData(value)
+        } else {
+            log.info "FCC0 Attribute 0x${attrId} = ${value}"
+        }
+    }
+
     log.info "-".multiply(50)
 
     // Store in state
@@ -419,7 +918,8 @@ private List parseReadAttr(String description) {
     state.discoveryResults[cluster][attrId] = [
         value: value,
         decoded: decodedValue,
-        encoding: encoding
+        encoding: encoding,
+        endpoint: endpoint
     ]
 
     // Update device info attributes
@@ -437,34 +937,106 @@ private List parseReadAttr(String description) {
 private List parseCatchall(String description) {
     def descMap = zigbee.parseDescriptionAsMap(description)
 
+    def clusterId = descMap.clusterId ?: descMap.cluster
+    def clusterName = CLUSTER_NAMES[clusterId?.toUpperCase()] ?: "Unknown"
+
     log.info "-".multiply(50)
     log.info "CATCHALL MESSAGE"
     log.info "-".multiply(50)
     log.info "Profile: ${descMap.profileId}"
-    log.info "Cluster: ${descMap.clusterId} (${CLUSTER_NAMES[descMap.clusterId] ?: 'Unknown'})"
+    log.info "Cluster: ${clusterId} (${clusterName})"
     log.info "Command: ${descMap.command}"
     log.info "Source Endpoint: ${descMap.sourceEndpoint}"
     log.info "Dest Endpoint: ${descMap.destinationEndpoint}"
     log.info "Data: ${descMap.data}"
+    log.info "Direction: ${descMap.direction}"
+    log.info "Is Cluster Specific: ${descMap.clusterInt}"
+
+    // Check for On/Off cluster command response
+    if (clusterId?.toUpperCase() == "0006") {
+        log.warn "=".multiply(50)
+        log.warn "*** ON/OFF CLUSTER CATCHALL ***"
+        log.warn "=".multiply(50)
+        log.warn "Command: ${descMap.command}"
+        log.warn "From Endpoint: ${descMap.sourceEndpoint}"
+
+        if (descMap.command == "0B") {
+            // Default response - indicates command was received
+            def status = descMap.data?.getAt(1) ?: "unknown"
+            log.warn "*** COMMAND ACKNOWLEDGMENT - Status: ${status == "00" ? "SUCCESS" : "FAILED (${status})"} ***"
+            sendEvent(name: "lastSwitchResponse", value: "ACK from EP${descMap.sourceEndpoint}: ${status}")
+        } else if (descMap.command == "01") {
+            log.warn "*** ON COMMAND DETECTED ***"
+        } else if (descMap.command == "00") {
+            log.warn "*** OFF COMMAND DETECTED ***"
+        } else if (descMap.command == "0A") {
+            // Report attributes
+            if (descMap.data?.size() > 2) {
+                def onOff = descMap.data[2]
+                log.warn "*** SWITCH STATE REPORT: ${onOff == "01" ? "ON" : "OFF"} ***"
+                sendEvent(name: "switch", value: onOff == "01" ? "on" : "off")
+            }
+        }
+        log.warn "=".multiply(50)
+    }
+
+    // Check for FCC0 cluster (Aqara)
+    if (clusterId?.toUpperCase() == "FCC0") {
+        log.warn "=".multiply(50)
+        log.warn "*** AQARA FCC0 CATCHALL ***"
+        log.warn "=".multiply(50)
+        log.warn "Command: ${descMap.command}"
+        log.warn "Data: ${descMap.data}"
+
+        // If it's a report attribute command (0A)
+        if (descMap.command == "0A" && descMap.data) {
+            parseFCC0ReportAttributes(descMap.data)
+        }
+        log.warn "=".multiply(50)
+    }
 
     // Parse simple descriptor response
-    if (descMap.clusterId == "8004" && descMap.data) {
+    if (clusterId == "8004" && descMap.data) {
         parseSimpleDescriptor(descMap.data)
     }
 
     // Parse active endpoints response
-    if (descMap.clusterId == "8005" && descMap.data) {
+    if (clusterId == "8005" && descMap.data) {
         parseActiveEndpoints(descMap.data)
     }
 
     // Parse report attributes
-    if (descMap.command == "0A" && descMap.data) {
-        parseReportAttributes(descMap.clusterId, descMap.data)
+    if (descMap.command == "0A" && descMap.data && clusterId != "FCC0") {
+        parseReportAttributes(clusterId, descMap.data)
     }
 
     log.info "-".multiply(50)
 
     return []
+}
+
+// Parse FCC0 report attributes (Aqara specific)
+private void parseFCC0ReportAttributes(List data) {
+    log.info "Parsing FCC0 Report Attributes..."
+    log.info "Data: ${data}"
+
+    // Check if this contains F7 attribute (00F7)
+    if (data.size() >= 4 && data[0] == "F7" && data[1] == "00") {
+        log.info "Detected F7 attribute in report"
+        // Extract the value portion
+        def dataType = data[2]
+        def valueStart = 3
+
+        if (dataType == "41" || dataType == "42") {
+            // String type - next byte is length
+            def len = Integer.parseInt(data[3], 16)
+            valueStart = 4
+            if (data.size() > valueStart + len) {
+                def hexValue = data[valueStart..<(valueStart + len)].join("")
+                parseF7TLVData(hexValue)
+            }
+        }
+    }
 }
 
 private void parseSimpleDescriptor(List data) {

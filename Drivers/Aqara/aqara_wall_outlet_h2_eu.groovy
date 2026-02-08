@@ -19,7 +19,21 @@
  *  - Power outage counter
  *  - Health check monitoring
  *
- *  Version: 1.0.0
+ *  Version: 1.1.4
+ *
+ *  Changelog:
+ *  1.1.4 - Fixed floating point precision using String.format for IEEE 754 values
+ *        - Removed EnergyMeter capability (not needed)
+ *        - Use BigDecimal arithmetic to avoid precision loss
+ *  1.1.3 - Fixed floating point precision issues (crazy long decimals)
+ *        - Use BigDecimal with string conversion for precise formatting
+ *  1.1.2 - Fixed formatDecimal to return Double instead of BigDecimal
+ *        - Proper handling of all value types for Hubitat compatibility
+ *  1.1.1 - Fixed number formatting to avoid scientific notation (0E+1)
+ *  1.1.0 - Changed to explicit endpoint commands for switch control
+ *        - Added switchEndpoint preference (endpoints 01 or 02)
+ *        - Added Aqara magic bytes initialization
+ *  1.0.0 - Initial release
  *
  *  References:
  *  - https://www.zigbee2mqtt.io/devices/WP-P01D.html
@@ -32,7 +46,10 @@ import groovy.transform.Field
 
 // ==================== Constants ====================
 
-@Field static final String DRIVER_VERSION = "1.0.5"
+@Field static final String DRIVER_VERSION = "1.1.4"
+
+// Default endpoint for switch control - This device uses endpoint 01 for the outlet
+@Field static final String DEFAULT_SWITCH_ENDPOINT = "01"
 
 // Cluster IDs
 @Field static final int CLUSTER_BASIC = 0x0000
@@ -96,7 +113,6 @@ metadata {
         capability "Switch"
         capability "Outlet"
         capability "PowerMeter"
-        capability "EnergyMeter"
         capability "VoltageMeasurement"
         capability "CurrentMeter"
         capability "TemperatureMeasurement"
@@ -127,15 +143,28 @@ metadata {
         command "setChargingProtection", [[name: "enabled*", type: "ENUM", constraints: ["on", "off"],
                                            description: "Auto-off when charging complete"]]
         command "setChargingLimit", [[name: "power*", type: "NUMBER", description: "Charging complete threshold (0.1-2W)"]]
-        command "resetEnergy"
 
-        // Fingerprints
+        // Fingerprints - various combinations for device discovery
+        // Main endpoint 01
         fingerprint profileId: "0104", endpointId: "01",
                     inClusters: "0000,0003,0004,0005,0006,0012,0402,0702,0B04,FCC0",
                     outClusters: "000A,0019",
                     manufacturer: "Aqara", model: "lumi.plug.aeu001",
                     deviceJoinName: "Aqara Wall Outlet H2 EU"
 
+        // Endpoint 02
+        fingerprint profileId: "0104", endpointId: "02",
+                    inClusters: "0006",
+                    manufacturer: "Aqara", model: "lumi.plug.aeu001",
+                    deviceJoinName: "Aqara Wall Outlet H2 EU"
+
+        // Green Power endpoint 15 (0x15 = 21)
+        fingerprint profileId: "A1E0", endpointId: "F2",
+                    inClusters: "0021",
+                    manufacturer: "Aqara", model: "lumi.plug.aeu001",
+                    deviceJoinName: "Aqara Wall Outlet H2 EU"
+
+        // Simple fingerprints by manufacturer/model only
         fingerprint manufacturer: "Aqara", model: "lumi.plug.aeu001",
                     deviceJoinName: "Aqara Wall Outlet H2 EU"
 
@@ -143,6 +172,10 @@ metadata {
                     deviceJoinName: "Aqara Wall Outlet H2 EU"
 
         fingerprint manufacturer: "aqara", model: "lumi.plug.aeu001",
+                    deviceJoinName: "Aqara Wall Outlet H2 EU"
+
+        // Model-only fingerprint (manufacturer may be blank/unknown on some devices)
+        fingerprint model: "lumi.plug.aeu001",
                     deviceJoinName: "Aqara Wall Outlet H2 EU"
     }
 
@@ -170,6 +203,11 @@ metadata {
                   ["120": "Every 2 hours"]
               ],
               defaultValue: "60"
+
+        input name: "switchEndpoint", type: "enum", title: "Switch endpoint",
+              description: "Endpoint to use for switch control (try 02 if 01 doesn't work)",
+              options: [["01": "Endpoint 01 (default)"], ["02": "Endpoint 02"]],
+              defaultValue: "01"
 
         // Divisor settings (auto-detected but can be overridden)
         input name: "powerDivisor", type: "number", title: "Power divisor",
@@ -230,37 +268,46 @@ def initialize() {
 // ==================== Configuration ====================
 
 def configure() {
-    log.info "Configuring Aqara Wall Outlet H2 EU..."
+    log.info "Configuring Aqara Wall Outlet H2 EU (v${DRIVER_VERSION})..."
 
     def cmds = []
 
-    // Write Aqara "magic bytes" to enable device functionality
-    // This is required for Aqara devices to work properly with third-party hubs
-    // Write 0x01 to attribute 0xFFF0 on Lumi cluster to enable operation mode
-    cmds += zigbee.writeAttribute(CLUSTER_LUMI, 0xFFF0, 0x41, "00", [mfgCode: LUMI_MFG_CODE])
-    cmds += "delay 500"
+    // ============ AQARA MAGIC BYTES ============
+    // Write to FCC0 cluster attribute 0x0009 to enable device for third-party hubs
+    // This is critical for Aqara devices to respond to commands properly
+    log.info "Sending Aqara magic bytes..."
+    cmds += zigbee.writeAttribute(CLUSTER_LUMI, 0x0009, 0x20, 0x01, [mfgCode: LUMI_MFG_CODE])
+    cmds += "delay 1000"
 
-    // Bind On/Off cluster
-    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0006 {${device.zigbeeId}} {}"
+    // ============ CLUSTER BINDINGS ============
+    // Bind On/Off cluster on endpoint 01
+    log.info "Binding On/Off cluster..."
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x01 0x0006 {${device.zigbeeId}} {}"
     cmds += "delay 500"
 
     // Bind Electrical Measurement cluster
-    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0B04 {${device.zigbeeId}} {}"
+    log.info "Binding Electrical Measurement cluster..."
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x01 0x0B04 {${device.zigbeeId}} {}"
     cmds += "delay 500"
 
     // Bind Metering cluster
-    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0702 {${device.zigbeeId}} {}"
+    log.info "Binding Metering cluster..."
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x01 0x0702 {${device.zigbeeId}} {}"
     cmds += "delay 500"
 
     // Bind Temperature cluster
-    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0x0402 {${device.zigbeeId}} {}"
+    log.info "Binding Temperature cluster..."
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x01 0x0402 {${device.zigbeeId}} {}"
     cmds += "delay 500"
 
     // Bind Lumi cluster for special reports
-    cmds += "zdo bind 0x${device.deviceNetworkId} 0x01 0x01 0xFCC0 {${device.zigbeeId}} {}"
+    log.info "Binding Lumi/Aqara cluster..."
+    cmds += "zdo bind 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x01 0xFCC0 {${device.zigbeeId}} {}"
     cmds += "delay 500"
 
+    // ============ CONFIGURE REPORTING ============
     // Configure On/Off reporting
+    log.info "Configuring On/Off reporting..."
     cmds += zigbee.configureReporting(CLUSTER_ONOFF, ATTR_ONOFF, 0x10, 0, 3600, null)
     cmds += "delay 300"
 
@@ -360,11 +407,18 @@ def healthCheck() {
 def pollPower() {
     logDebug "Polling power..."
     def cmds = []
-    cmds += zigbee.readAttribute(CLUSTER_ELECTRICAL, ATTR_ACTIVE_POWER)
-    cmds += zigbee.readAttribute(CLUSTER_ELECTRICAL, ATTR_RMS_VOLTAGE)
-    cmds += zigbee.readAttribute(CLUSTER_ELECTRICAL, ATTR_RMS_CURRENT)
-    cmds += zigbee.readAttribute(CLUSTER_METERING, ATTR_CURRENT_SUMMATION)
-    cmds += zigbee.readAttribute(CLUSTER_TEMPERATURE, ATTR_MEASURED_VALUE)
+
+    // Use explicit endpoint for all reads
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0B04 0x050B {}"
+    cmds += "delay 100"
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0B04 0x0505 {}"
+    cmds += "delay 100"
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0B04 0x0508 {}"
+    cmds += "delay 100"
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0702 0x0000 {}"
+    cmds += "delay 100"
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0402 0x0000 {}"
+
     sendZigbeeCommands(cmds)
 }
 
@@ -373,31 +427,31 @@ def refresh() {
 
     def cmds = []
 
-    // On/Off state
-    cmds += zigbee.readAttribute(CLUSTER_ONOFF, ATTR_ONOFF)
-    cmds += "delay 100"
+    // On/Off state - use explicit endpoint
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0006 0x0000 {}"
+    cmds += "delay 200"
 
-    // Power
-    cmds += zigbee.readAttribute(CLUSTER_ELECTRICAL, ATTR_ACTIVE_POWER)
-    cmds += "delay 100"
+    // Power (Active Power attribute 0x050B)
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0B04 0x050B {}"
+    cmds += "delay 200"
 
-    // Voltage
-    cmds += zigbee.readAttribute(CLUSTER_ELECTRICAL, ATTR_RMS_VOLTAGE)
-    cmds += "delay 100"
+    // Voltage (RMS Voltage attribute 0x0505)
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0B04 0x0505 {}"
+    cmds += "delay 200"
 
-    // Current
-    cmds += zigbee.readAttribute(CLUSTER_ELECTRICAL, ATTR_RMS_CURRENT)
-    cmds += "delay 100"
+    // Current (RMS Current attribute 0x0508)
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0B04 0x0508 {}"
+    cmds += "delay 200"
 
-    // Energy
-    cmds += zigbee.readAttribute(CLUSTER_METERING, ATTR_CURRENT_SUMMATION)
-    cmds += "delay 100"
+    // Energy (Current Summation attribute 0x0000)
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0702 0x0000 {}"
+    cmds += "delay 200"
 
     // Temperature
-    cmds += zigbee.readAttribute(CLUSTER_TEMPERATURE, ATTR_MEASURED_VALUE)
-    cmds += "delay 100"
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${getSwitchEndpoint()} 0x0402 0x0000 {}"
+    cmds += "delay 200"
 
-    // Read Lumi special report attribute (may contain power data)
+    // Read Lumi special F7 attribute (contains power data)
     cmds += zigbee.readAttribute(CLUSTER_LUMI, 0x00F7, [mfgCode: LUMI_MFG_CODE])
 
     return cmds
@@ -409,14 +463,52 @@ def ping() {
 
 // ==================== Switch Commands ====================
 
+// Get the configured switch endpoint
+private String getSwitchEndpoint() {
+    return settings?.switchEndpoint ?: DEFAULT_SWITCH_ENDPOINT
+}
+
 def on() {
-    logInfo "Turning on"
-    return zigbee.on()
+    def ep = getSwitchEndpoint()
+    logInfo "Turning on (endpoint ${ep})"
+
+    def cmds = []
+    // Send explicit On command to endpoint, cluster 0x0006, command 0x01 (On)
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x01 {}"
+    cmds += "delay 500"
+    // Read back the state to confirm
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x0000 {}"
+
+    return cmds
 }
 
 def off() {
-    logInfo "Turning off"
-    return zigbee.off()
+    def ep = getSwitchEndpoint()
+    logInfo "Turning off (endpoint ${ep})"
+
+    def cmds = []
+    // Send explicit Off command to endpoint, cluster 0x0006, command 0x00 (Off)
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x00 {}"
+    cmds += "delay 500"
+    // Read back the state to confirm
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x0000 {}"
+
+    return cmds
+}
+
+// Toggle command
+def toggle() {
+    def ep = getSwitchEndpoint()
+    logInfo "Toggling (endpoint ${ep})"
+
+    def cmds = []
+    // Send Toggle command (0x02) to On/Off cluster
+    cmds += "he cmd 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x02 {}"
+    cmds += "delay 500"
+    // Read back the state
+    cmds += "he rattr 0x${device.deviceNetworkId} 0x${ep} 0x0006 0x0000 {}"
+
+    return cmds
 }
 
 // ==================== Custom Commands ====================
@@ -510,12 +602,6 @@ def setChargingLimit(power) {
 
     sendEvent(name: "chargingLimit", value: powerVal, unit: "W")
     sendZigbeeCommands(cmds)
-}
-
-def resetEnergy() {
-    logInfo "Resetting energy meter"
-    // Note: Not all devices support this. The actual reset command may vary.
-    sendEvent(name: "energy", value: 0, unit: "kWh")
 }
 
 // ==================== Parse ====================
@@ -658,7 +744,7 @@ private List handleTemperatureCluster(String attrId, String value) {
             unit = "°F"
         }
 
-        temp = ((temp * 10).toLong()) / 10.0
+        temp = formatDecimal(temp, 1)
 
         events << createEvent(name: "temperature", value: temp, unit: unit)
         logInfo "Temperature: ${temp}${unit}"
@@ -671,14 +757,11 @@ private List handleMeteringCluster(String attrId, String value) {
     def events = []
 
     switch(attrId) {
-        case "0000":  // Current Summation Delivered (Energy)
+        case "0000":  // Current Summation Delivered (Energy) - logged but not exposed
             Long rawValue = Long.parseLong(value, 16)
             BigDecimal divisor = state.energyDivisor ?: (energyDivisor ?: 1000)
-            BigDecimal energy = rawValue / divisor
-            BigDecimal energyFormatted = ((energy * 1000).toLong()) / 1000.0
-
-            events << createEvent(name: "energy", value: energyFormatted, unit: "kWh")
-            logInfo "Energy: ${energyFormatted} kWh"
+            BigDecimal energy = new BigDecimal(rawValue).divide(divisor, 3, BigDecimal.ROUND_HALF_UP)
+            logDebug "Energy: ${energy} kWh (not exposed)"
             break
 
         case "0301":  // Multiplier
@@ -703,30 +786,30 @@ private List handleElectricalCluster(String attrId, String value) {
             Integer rawPower = Integer.parseInt(value, 16)
             BigDecimal divisor = state.powerDivisor ?: (powerDivisor ?: 10)
             BigDecimal power = rawPower / divisor
-            BigDecimal powerFormatted = ((power * 10).toLong()) / 10.0
+            power = formatDecimal(power, 1)
 
-            events << createEvent(name: "power", value: powerFormatted, unit: "W")
-            logInfo "Power: ${powerFormatted} W"
+            events << createEvent(name: "power", value: power, unit: "W")
+            logInfo "Power: ${power} W"
             break
 
         case "0505":  // RMS Voltage
             Integer rawVoltage = Integer.parseInt(value, 16)
             BigDecimal vDivisor = state.voltageDivisor ?: (voltageDivisor ?: 10)
             BigDecimal voltage = rawVoltage / vDivisor
-            BigDecimal voltageFormatted = ((voltage * 10).toLong()) / 10.0
+            voltage = formatDecimal(voltage, 1)
 
-            events << createEvent(name: "voltage", value: voltageFormatted, unit: "V")
-            logInfo "Voltage: ${voltageFormatted} V"
+            events << createEvent(name: "voltage", value: voltage, unit: "V")
+            logInfo "Voltage: ${voltage} V"
             break
 
         case "0508":  // RMS Current
             Integer rawCurrent = Integer.parseInt(value, 16)
             BigDecimal cDivisor = state.currentDivisor ?: (currentDivisor ?: 1000)
             BigDecimal current = rawCurrent / cDivisor
-            BigDecimal currentFormatted = ((current * 1000).toLong()) / 1000.0
+            current = formatDecimal(current, 3)
 
-            events << createEvent(name: "amperage", value: currentFormatted, unit: "A")
-            logInfo "Current: ${currentFormatted} A"
+            events << createEvent(name: "amperage", value: current, unit: "A")
+            logInfo "Current: ${current} A"
             break
 
         case "0601":  // Voltage Divisor
@@ -742,6 +825,16 @@ private List handleElectricalCluster(String attrId, String value) {
         case "0605":  // Power Divisor
             state.powerDivisor = Integer.parseInt(value, 16)
             logDebug "Power divisor: ${state.powerDivisor}"
+            break
+
+        case "0502":  // RMS Voltage (alternative attribute)
+            Integer rawVoltage2 = Integer.parseInt(value, 16)
+            BigDecimal vDivisor2 = state.voltageDivisor ?: (voltageDivisor ?: 10)
+            BigDecimal voltage2 = rawVoltage2 / vDivisor2
+            voltage2 = formatDecimal(voltage2, 1)
+
+            events << createEvent(name: "voltage", value: voltage2, unit: "V")
+            logInfo "Voltage (0502): ${voltage2} V"
             break
     }
 
@@ -959,14 +1052,14 @@ private List parseAqaraF7Struct(String hexString) {
 
                 case 0x03:  // Device temperature (°C)
                     if (value != null) {
-                        BigDecimal tempC = value as BigDecimal
+                        BigDecimal tempC = safeToBigDecimal(value)
                         BigDecimal temp = tempC
                         String unit = "°C"
                         if (tempUnit == "F") {
-                            temp = (tempC * 9 / 5) + 32
+                            temp = tempC.multiply(new BigDecimal("1.8")).add(new BigDecimal("32"))
                             unit = "°F"
                         }
-                        temp = ((temp * 10).toLong()) / 10.0
+                        temp = formatDecimal(temp, 1)
                         events << createEvent(name: "temperature", value: temp, unit: unit)
                         logInfo "Temperature: ${temp}${unit}"
                     }
@@ -1001,29 +1094,26 @@ private List parseAqaraF7Struct(String hexString) {
                     logDebug "Switch 2: ${value == 1 || value == true ? 'on' : 'off'}"
                     break
 
-                case 0x95:  // Energy consumption (float, Wh)
+                case 0x95:  // Energy consumption (float, Wh) - logged but not exposed
                     if (value != null) {
-                        BigDecimal energy = (value as BigDecimal) / 1000.0  // Wh to kWh
-                        energy = ((energy * 1000).toLong()) / 1000.0
-                        events << createEvent(name: "energy", value: energy, unit: "kWh")
-                        logInfo "Energy: ${energy} kWh"
+                        BigDecimal energy = safeToBigDecimal(value).divide(new BigDecimal("1000"), 6, BigDecimal.ROUND_HALF_UP)
+                        logDebug "Energy: ${energy} kWh (not exposed)"
                     }
                     break
 
-                case 0x96:  // Voltage (float in decivolts)
+                case 0x96:  // Voltage (float - raw value is in decivolts, divide by 10)
                     if (value != null) {
-                        BigDecimal voltage = (value as BigDecimal) / 10.0
-                        voltage = ((voltage * 10).toLong()) / 10.0
+                        BigDecimal voltage = safeToBigDecimal(value).divide(new BigDecimal("10"), 2, BigDecimal.ROUND_HALF_UP)
+                        voltage = formatDecimal(voltage, 1)
                         events << createEvent(name: "voltage", value: voltage, unit: "V")
                         logInfo "Voltage: ${voltage} V"
                     }
                     break
 
-                case 0x97:  // Current (float in mA or A)
+                case 0x97:  // Current (float in A)
                     if (value != null) {
-                        BigDecimal current = value as BigDecimal
-                        if (dataType != 0x39) current = current / 1000.0  // mA to A for integers
-                        current = ((current * 1000).toLong()) / 1000.0
+                        BigDecimal current = safeToBigDecimal(value)
+                        current = formatDecimal(current, 3)
                         events << createEvent(name: "amperage", value: current, unit: "A")
                         logInfo "Current: ${current} A"
                     }
@@ -1031,8 +1121,8 @@ private List parseAqaraF7Struct(String hexString) {
 
                 case 0x98:  // Power (float, watts)
                     if (value != null) {
-                        BigDecimal power = value as BigDecimal
-                        power = ((power * 10).toLong()) / 10.0
+                        BigDecimal power = safeToBigDecimal(value)
+                        power = formatDecimal(power, 1)
                         events << createEvent(name: "power", value: power, unit: "W")
                         logInfo "Power: ${power} W"
                     }
@@ -1142,6 +1232,38 @@ private List handleCatchall(Map descMap) {
 }
 
 // ==================== Helper Methods ====================
+
+/**
+ * Safely convert any numeric value to BigDecimal
+ * Uses string conversion for Float/Double to avoid IEEE 754 precision issues
+ */
+private BigDecimal safeToBigDecimal(def value) {
+    if (value == null) return BigDecimal.ZERO
+    if (value instanceof BigDecimal) return value
+    if (value instanceof Float || value instanceof Double) {
+        // CRITICAL: Use String.format to get clean representation, not toString()
+        // toString() on float 2.9 gives "2.9" but the underlying bits are garbage
+        // We need to round at the string level
+        return new BigDecimal(String.format("%.6f", value))
+    }
+    return new BigDecimal(value)
+}
+
+/**
+ * Format a decimal number to a specific number of decimal places
+ * Returns BigDecimal to avoid floating point precision issues
+ */
+private BigDecimal formatDecimal(def value, int decimalPlaces) {
+    if (value == null) return BigDecimal.ZERO
+
+    try {
+        BigDecimal bd = safeToBigDecimal(value)
+        return bd.setScale(decimalPlaces, BigDecimal.ROUND_HALF_UP)
+    } catch (e) {
+        log.warn "formatDecimal error for value ${value}: ${e.message}"
+        return BigDecimal.ZERO
+    }
+}
 
 private void updateLastActivity() {
     def now = new Date()
