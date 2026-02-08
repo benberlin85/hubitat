@@ -32,7 +32,7 @@ import groovy.transform.Field
 
 // ==================== Constants ====================
 
-@Field static final String DRIVER_VERSION = "1.0.3"
+@Field static final String DRIVER_VERSION = "1.0.4"
 
 // Cluster IDs
 @Field static final int CLUSTER_BASIC = 0x0000
@@ -837,107 +837,112 @@ private List parseAqaraF7Struct(String hexString) {
     logDebug "F7 data: ${hexString}"
 
     try {
+        // Convert hex string to list of 2-char hex values
+        List<String> bytes = []
+        for (int i = 0; i < hexString.length() - 1; i += 2) {
+            bytes.add(hexString.substring(i, i + 2))
+        }
+
         int idx = 0
-        while (idx < hexString.length() - 3) {
-            // Get tag (1 byte = 2 hex chars)
-            String tagHex = hexString.substring(idx, idx + 2)
+        while (idx < bytes.size() - 1) {
+            // Get tag (1 byte)
+            String tagHex = bytes[idx]
             int tag = Integer.parseInt(tagHex, 16)
-            idx += 2
+            idx++
 
-            // Get data type (1 byte = 2 hex chars)
-            if (idx + 2 > hexString.length()) break
-            String typeHex = hexString.substring(idx, idx + 2)
+            if (idx >= bytes.size()) break
+
+            // Get data type (1 byte)
+            String typeHex = bytes[idx]
             int dataType = Integer.parseInt(typeHex, 16)
-            idx += 2
+            idx++
 
-            // Determine value length based on data type
-            int valueLen = 0
+            // Determine value length based on data type (in bytes)
+            int valueBytes = 0
             switch(dataType) {
                 case 0x10:  // Boolean - 1 byte
-                    valueLen = 2
-                    break
+                    valueBytes = 1; break
                 case 0x20:  // Uint8 - 1 byte
-                    valueLen = 2
-                    break
+                    valueBytes = 1; break
                 case 0x21:  // Uint16LE - 2 bytes
-                    valueLen = 4
-                    break
+                    valueBytes = 2; break
                 case 0x22:  // Uint24LE - 3 bytes
-                    valueLen = 6
-                    break
+                    valueBytes = 3; break
                 case 0x23:  // Uint32LE - 4 bytes
-                    valueLen = 8
-                    break
+                    valueBytes = 4; break
                 case 0x25:  // Uint48LE - 6 bytes
-                    valueLen = 12
-                    break
+                    valueBytes = 6; break
                 case 0x28:  // Int8 - 1 byte
-                    valueLen = 2
-                    break
+                    valueBytes = 1; break
                 case 0x29:  // Int16LE - 2 bytes
-                    valueLen = 4
-                    break
+                    valueBytes = 2; break
                 case 0x2B:  // Int32LE - 4 bytes
-                    valueLen = 8
-                    break
+                    valueBytes = 4; break
                 case 0x39:  // FloatLE - 4 bytes
-                    valueLen = 8
-                    break
+                    valueBytes = 4; break
                 case 0x3A:  // DoubleLE - 8 bytes
-                    valueLen = 16
-                    break
+                    valueBytes = 8; break
                 default:
-                    logDebug "Unknown data type: 0x${typeHex} at tag 0x${tagHex}, pos ${idx}"
-                    // Try to continue by assuming 1 byte
-                    valueLen = 2
-                    break
+                    logDebug "Unknown data type: 0x${typeHex} at tag 0x${tagHex}"
+                    valueBytes = 1; break
             }
 
-            if (idx + valueLen > hexString.length()) {
-                logDebug "Not enough data for tag 0x${tagHex} type 0x${typeHex}, need ${valueLen} chars at pos ${idx}"
+            if (idx + valueBytes > bytes.size()) {
+                logDebug "Not enough data for tag 0x${tagHex} type 0x${typeHex}"
                 break
             }
 
-            String valueHex = hexString.substring(idx, idx + valueLen)
-            idx += valueLen
+            // Extract value bytes and join to hex string
+            String valueHex = bytes[idx..<(idx + valueBytes)].join("")
+            idx += valueBytes
 
             // Parse value based on data type
             def value = null
             switch(dataType) {
                 case 0x10:  // Boolean
-                    value = valueHex == "01"
+                    value = (bytes[idx - 1] == "01")
                     break
                 case 0x20:  // Uint8
                     value = Integer.parseInt(valueHex, 16)
                     break
-                case 0x21:  // Uint16LE
-                    value = littleEndianHexToInt(valueHex)
+                case 0x21:  // Uint16LE - reverse bytes
+                    value = Integer.parseInt(bytes[idx - 1] + bytes[idx - 2], 16)
                     break
-                case 0x22:  // Uint24LE
-                    value = littleEndianHexToInt(valueHex)
+                case 0x22:  // Uint24LE - reverse bytes
+                    value = Integer.parseInt(bytes[idx - 1] + bytes[idx - 2] + bytes[idx - 3], 16)
                     break
-                case 0x23:  // Uint32LE
-                    value = littleEndianHexToLong(valueHex)
+                case 0x23:  // Uint32LE - reverse bytes
+                    value = Long.parseLong(bytes[idx - 1] + bytes[idx - 2] + bytes[idx - 3] + bytes[idx - 4], 16)
                     break
-                case 0x25:  // Uint48LE
-                    value = littleEndianHexToLong(valueHex)
+                case 0x25:  // Uint48LE - reverse bytes
+                    String reversed = ""
+                    for (int b = valueBytes - 1; b >= 0; b--) {
+                        reversed += bytes[idx - valueBytes + b]
+                    }
+                    value = Long.parseLong(reversed, 16)
                     break
                 case 0x28:  // Int8
                     int v = Integer.parseInt(valueHex, 16)
-                    value = v > 127 ? v - 256 : v
+                    value = (v > 127) ? (v - 256) : v
                     break
-                case 0x29:  // Int16LE
-                    value = hexToSignedInt16LE(valueHex)
+                case 0x29:  // Int16LE - reverse bytes then signed
+                    int raw = Integer.parseInt(bytes[idx - 1] + bytes[idx - 2], 16)
+                    value = (raw > 32767) ? (raw - 65536) : raw
                     break
-                case 0x2B:  // Int32LE
-                    value = littleEndianHexToLong(valueHex)
-                    if (value > 2147483647L) value -= 4294967296L
+                case 0x2B:  // Int32LE - reverse bytes
+                    long rawL = Long.parseLong(bytes[idx - 1] + bytes[idx - 2] + bytes[idx - 3] + bytes[idx - 4], 16)
+                    value = (rawL > 2147483647L) ? (rawL - 4294967296L) : rawL
                     break
-                case 0x39:  // FloatLE
-                    value = littleEndianHexToFloat(valueHex)
+                case 0x39:  // FloatLE - reverse bytes then parse IEEE 754
+                    String floatBE = bytes[idx - 1] + bytes[idx - 2] + bytes[idx - 3] + bytes[idx - 4]
+                    value = Float.intBitsToFloat(Integer.parseUnsignedInt(floatBE, 16))
                     break
-                case 0x3A:  // DoubleLE
-                    value = littleEndianHexToDouble(valueHex)
+                case 0x3A:  // DoubleLE - reverse bytes
+                    String doubleBE = ""
+                    for (int b = valueBytes - 1; b >= 0; b--) {
+                        doubleBE += bytes[idx - valueBytes + b]
+                    }
+                    value = Double.longBitsToDouble(Long.parseUnsignedLong(doubleBE, 16))
                     break
                 default:
                     value = Integer.parseInt(valueHex, 16)
@@ -949,9 +954,7 @@ private List parseAqaraF7Struct(String hexString) {
             // Process known tags
             switch(tag) {
                 case 0x01:  // Battery voltage (mV)
-                    if (value != null) {
-                        logDebug "Battery voltage: ${value} mV"
-                    }
+                    logDebug "Battery voltage: ${value} mV"
                     break
 
                 case 0x03:  // Device temperature (°C)
@@ -969,9 +972,8 @@ private List parseAqaraF7Struct(String hexString) {
                     }
                     break
 
-                case 0x05:  // RSSI / power outage count
+                case 0x05:  // Power outage count
                     if (value != null) {
-                        // For plugs this is often power outage count (value - 1)
                         int count = (value as Integer)
                         if (count > 0) count -= 1
                         events << createEvent(name: "powerOutageCount", value: count)
@@ -983,28 +985,8 @@ private List parseAqaraF7Struct(String hexString) {
                     logDebug "LQI: ${value}"
                     break
 
-                case 0x09:  // Unknown - often seen
-                    logDebug "Tag 0x09: ${value}"
-                    break
-
-                case 0x0A:  // Parent network address
-                    logDebug "Parent address: 0x${String.format('%04X', value as Integer)}"
-                    break
-
-                case 0x0B:  // Unknown
-                    logDebug "Tag 0x0B: ${value}"
-                    break
-
-                case 0x0C:  // Unknown
-                    logDebug "Tag 0x0C: ${value}"
-                    break
-
-                case 0x0D:  // Unknown (often uint32)
-                    logDebug "Tag 0x0D: ${value}"
-                    break
-
-                case 0x11:  // Unknown (often uint32)
-                    logDebug "Tag 0x11: ${value}"
+                case 0x09: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x11:
+                    logDebug "Tag 0x${tagHex}: ${value}"
                     break
 
                 case 0x64:  // On/Off state (100 decimal)
@@ -1015,50 +997,32 @@ private List parseAqaraF7Struct(String hexString) {
                     }
                     break
 
-                case 0x65:  // On/Off state 2 (101 decimal) - second endpoint
-                    if (value != null) {
-                        logDebug "Switch 2: ${value == 1 || value == true ? 'on' : 'off'}"
-                    }
+                case 0x65:  // On/Off state 2 (101 decimal)
+                    logDebug "Switch 2: ${value == 1 || value == true ? 'on' : 'off'}"
                     break
 
                 case 0x95:  // Energy consumption (float, Wh)
-                    // Note: In zigbee-herdsman this is often energy, not power
-                    if (value != null && (value as BigDecimal) != 0) {
-                        BigDecimal energy = value as BigDecimal
-                        // Convert Wh to kWh
-                        energy = energy / 1000.0
+                    if (value != null) {
+                        BigDecimal energy = (value as BigDecimal) / 1000.0  // Wh to kWh
                         energy = ((energy * 1000).toLong()) / 1000.0
                         events << createEvent(name: "energy", value: energy, unit: "kWh")
                         logInfo "Energy: ${energy} kWh"
                     }
                     break
 
-                case 0x96:  // Voltage (uint16 in decivolts or float)
-                    if (value != null && (value as BigDecimal) != 0) {
-                        BigDecimal voltage
-                        if (dataType == 0x39) {
-                            // Float value - typically in 0.1V units
-                            voltage = (value as BigDecimal) / 10.0
-                        } else {
-                            // Integer value in decivolts
-                            voltage = (value as BigDecimal) / 10.0
-                        }
+                case 0x96:  // Voltage (float in decivolts)
+                    if (value != null) {
+                        BigDecimal voltage = (value as BigDecimal) / 10.0
                         voltage = ((voltage * 10).toLong()) / 10.0
                         events << createEvent(name: "voltage", value: voltage, unit: "V")
                         logInfo "Voltage: ${voltage} V"
                     }
                     break
 
-                case 0x97:  // Current (uint16 in mA or float)
-                    if (value != null && (value as BigDecimal) != 0) {
-                        BigDecimal current
-                        if (dataType == 0x39) {
-                            // Float value
-                            current = value as BigDecimal
-                        } else {
-                            // Integer in milliamps
-                            current = (value as BigDecimal) / 1000.0
-                        }
+                case 0x97:  // Current (float in mA or A)
+                    if (value != null) {
+                        BigDecimal current = value as BigDecimal
+                        if (dataType != 0x39) current = current / 1000.0  // mA to A for integers
                         current = ((current * 1000).toLong()) / 1000.0
                         events << createEvent(name: "amperage", value: current, unit: "A")
                         logInfo "Current: ${current} A"
@@ -1066,7 +1030,7 @@ private List parseAqaraF7Struct(String hexString) {
                     break
 
                 case 0x98:  // Power (float, watts)
-                    if (value != null && (value as BigDecimal) != 0) {
+                    if (value != null) {
                         BigDecimal power = value as BigDecimal
                         power = ((power * 10).toLong()) / 10.0
                         events << createEvent(name: "power", value: power, unit: "W")
@@ -1074,7 +1038,7 @@ private List parseAqaraF7Struct(String hexString) {
                     }
                     break
 
-                case 0x9A:  // Overload status or other status byte
+                case 0x9A:  // Status byte
                     logDebug "Status 0x9A: ${value}"
                     break
 
@@ -1084,8 +1048,7 @@ private List parseAqaraF7Struct(String hexString) {
             }
         }
     } catch (e) {
-        logDebug "Error parsing Aqara F7 struct at position: ${e.message}"
-        log.error "Parse error: ${e}"
+        log.error "${device.displayName}: Error parsing F7 struct: ${e.message}", e
     }
 
     return events
