@@ -32,7 +32,7 @@ import groovy.transform.Field
 
 // ==================== Constants ====================
 
-@Field static final String DRIVER_VERSION = "1.0.2"
+@Field static final String DRIVER_VERSION = "1.0.3"
 
 // Cluster IDs
 @Field static final int CLUSTER_BASIC = 0x0000
@@ -554,10 +554,20 @@ def parse(String description) {
         }
 
         if (descMap) {
-            log.info "${device.displayName}: Parsed - cluster=${descMap.cluster}, attr=${descMap.attrId}, enc=${descMap.encoding}"
+            // Normalize cluster field - catchall uses clusterId, read attr uses cluster
+            String cluster = descMap.cluster ?: descMap.clusterId
+            log.info "${device.displayName}: Parsed - cluster=${cluster}, attr=${descMap.attrId}, enc=${descMap.encoding}, cmd=${descMap.command}"
 
-            if (descMap.cluster) {
-                events += handleReadAttr(descMap)
+            if (cluster) {
+                // Normalize the cluster field for handlers
+                descMap.cluster = cluster
+
+                // Handle catchall messages differently
+                if (description.startsWith("catchall:")) {
+                    events += handleCatchall(descMap)
+                } else {
+                    events += handleReadAttr(descMap)
+                }
             }
 
             // Check for additional attributes (some Zigbee messages contain multiple attrs)
@@ -1084,22 +1094,53 @@ private List parseAqaraF7Struct(String hexString) {
 private List handleCatchall(Map descMap) {
     def events = []
 
-    String clusterId = descMap.clusterId?.toUpperCase()
+    String clusterId = (descMap.cluster ?: descMap.clusterId)?.toUpperCase()
+    String command = descMap.command
 
-    if (clusterId == "0006" && descMap.command == "0B") {
-        if (descMap.data?.size() > 0) {
+    logDebug "Catchall: cluster=${clusterId}, cmd=${command}, data=${descMap.data}"
+
+    // Handle On/Off cluster responses
+    if (clusterId == "0006") {
+        if (command == "0B" && descMap.data?.size() > 0) {
+            // Default response - check the command that was responded to
             def cmd = descMap.data[0]
             if (cmd == "01") {
                 events << createEvent(name: "switch", value: "on")
+                logInfo "Switch: on (from response)"
             } else if (cmd == "00") {
                 events << createEvent(name: "switch", value: "off")
+                logInfo "Switch: off (from response)"
+            }
+        } else if (command == "01" && descMap.data?.size() >= 3) {
+            // Read attribute response
+            // Data format: [attrIdLo, attrIdHi, status, dataType, value...]
+            try {
+                if (descMap.data.size() >= 5 && descMap.data[2] == "00") {
+                    // Success status
+                    def switchValue = descMap.data[4] == "01" ? "on" : "off"
+                    events << createEvent(name: "switch", value: switchValue)
+                    logInfo "Switch: ${switchValue}"
+                }
+            } catch (e) {
+                logDebug "Error parsing on/off catchall: ${e.message}"
             }
         }
     }
 
+    // Handle Electrical Measurement cluster
+    if (clusterId == "0B04") {
+        logDebug "Electrical measurement catchall: cmd=${command}, data=${descMap.data}"
+        // These are typically responses to read requests
+    }
+
+    // Handle Metering cluster
+    if (clusterId == "0702") {
+        logDebug "Metering catchall: cmd=${command}, data=${descMap.data}"
+    }
+
     // Handle Lumi cluster catchall with attribute data
     if (clusterId == "FCC0") {
-        logDebug "Lumi catchall: command=${descMap.command}, data=${descMap.data}"
+        logDebug "Lumi catchall: command=${command}, data=${descMap.data}"
 
         // Check if this is an attribute report with data
         if (descMap.data && descMap.data.size() >= 4) {
@@ -1109,6 +1150,8 @@ private List handleCatchall(Map descMap) {
                 int attrIdLo = Integer.parseInt(descMap.data[0], 16)
                 int attrIdHi = Integer.parseInt(descMap.data[1], 16)
                 int attrId = (attrIdHi << 8) | attrIdLo
+
+                logDebug "Lumi catchall attr: 0x${String.format('%04X', attrId)}"
 
                 if (attrId == 0x00F7) {
                     // Build the hex string from remaining data bytes
@@ -1163,19 +1206,23 @@ private int hexToSignedInt16LE(String hex) {
 private int littleEndianHexToInt(String hex) {
     if (!hex || hex.length() < 2) return 0
     int result = 0
+    int byteIndex = 0
     for (int i = 0; i < hex.length(); i += 2) {
         int byteVal = Integer.parseInt(hex.substring(i, i + 2), 16)
-        result |= (byteVal << ((i / 2) * 8))
+        result |= (byteVal << (byteIndex * 8))
+        byteIndex++
     }
     return result
 }
 
 private long littleEndianHexToLong(String hex) {
-    if (!hex || hex.length() < 2) return 0
-    long result = 0
+    if (!hex || hex.length() < 2) return 0L
+    long result = 0L
+    int byteIndex = 0
     for (int i = 0; i < hex.length(); i += 2) {
-        long byteVal = Integer.parseInt(hex.substring(i, i + 2), 16)
-        result |= (byteVal << ((i / 2) * 8))
+        long byteVal = Long.parseLong(hex.substring(i, i + 2), 16)
+        result |= (byteVal << (byteIndex * 8))
+        byteIndex++
     }
     return result
 }
