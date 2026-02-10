@@ -6,7 +6,7 @@
  *  A driver for the Aqara Climate Sensor W100 with temperature, humidity,
  *  3 buttons (plus/center/minus), and optional external sensor support.
  *
- *  Version: 1.0.0
+ *  Version: 1.0.1
  *
  *  Clusters:
  *    0x0000 - Basic
@@ -177,12 +177,18 @@ def refresh() {
 // ==================== Parse ====================
 
 def parse(String description) {
-    logDebug "Parsing: ${description?.take(100)}..."
+    logDebug "Parsing: ${description?.take(120)}..."
 
     try {
         def descMap = zigbee.parseDescriptionAsMap(description)
 
-        if (description.startsWith("read attr -")) {
+        if (!descMap) {
+            logDebug "Could not parse description"
+            return []
+        }
+
+        // Handle all attribute reports (read attr, or reports with cluster/attrId)
+        if (description.startsWith("read attr -") || descMap.attrId != null) {
             parseReadAttr(descMap)
         } else if (description.startsWith("catchall:")) {
             parseCatchall(descMap)
@@ -309,7 +315,8 @@ private void parseMultistateCluster(String attrId, String value, String endpoint
 
 private void parseTemperatureCluster(String attrId, String value) {
     if (attrId == "0000") {
-        def rawTemp = Integer.parseInt(value, 16)
+        // Value comes in little-endian, swap bytes
+        def rawTemp = zigbee.convertHexToInt(value)
         // Handle signed value
         if (rawTemp > 32767) rawTemp -= 65536
         def tempC = rawTemp / 100.0
@@ -324,7 +331,8 @@ private void parseTemperatureCluster(String attrId, String value) {
 
 private void parseHumidityCluster(String attrId, String value) {
     if (attrId == "0000") {
-        def rawHumidity = Integer.parseInt(value, 16)
+        // Value comes in little-endian, use zigbee helper
+        def rawHumidity = zigbee.convertHexToInt(value)
         def humidity = rawHumidity / 100.0
         def offset = settings?.humidityOffset ?: 0
         humidity = humidity + offset
@@ -336,15 +344,32 @@ private void parseHumidityCluster(String attrId, String value) {
 }
 
 private void parseAqaraCluster(String attrId, String value, Map descMap) {
-    logDebug "Aqara FCC0 attr 0x${attrId} = ${value}"
+    logDebug "Aqara FCC0 attr 0x${attrId} = ${value?.take(60)}..."
 
     switch (attrId) {
         case "00F7":
         case "F7":
             parseF7TLVData(value)
             break
+        case "00EE":
+        case "EE":
+            // Unknown attribute, likely device info
+            logDebug "FCC0 attr 0xEE: ${value}"
+            break
+        case "0020":
+            // Power outage count or similar
+            def count = zigbee.convertHexToInt(value)
+            logDebug "FCC0 attr 0x20: ${count}"
+            break
         default:
-            logDebug "Unknown FCC0 attribute 0x${attrId}"
+            logDebug "Unhandled FCC0 attribute 0x${attrId}: ${value?.take(40)}"
+    }
+
+    // Also handle additionalAttrs if present
+    if (descMap.additionalAttrs) {
+        descMap.additionalAttrs.each { attr ->
+            logDebug "FCC0 additional attr 0x${attr.attrId}: ${attr.value?.take(40)}"
+        }
     }
 }
 
