@@ -113,6 +113,42 @@ Comprehensive driver for the Aqara Wall Outlet H2 EU with power monitoring.
 
 ---
 
+#### Aqara FP1E Presence Sensor
+**Location:** `Drivers/Aqara/aqara_fp1e_presence.groovy`
+
+Driver for the Aqara FP1E mmWave radar human presence detector.
+
+**Features:**
+- Presence detection (present/not present)
+- Motion detection (active/inactive)
+- Room state tracking (occupied/unoccupied)
+- Activity state (idle/large movement/small movement)
+- Target distance measurement (meters)
+- Detection range configuration (0.1-6.0m)
+- Motion sensitivity setting (low/medium/high)
+- Device temperature monitoring
+- Configurable motion timeout
+- Spam filter for distance reports
+
+**Supported Models:** lumi.sensor_occupy.agl1 / RTCZCGQ13LM
+
+**Important Pairing Notes:**
+The FP1E requires a special "double-join" procedure to work properly with Hubitat:
+
+1. **Reset the device:** Hold the reset button for 10 seconds
+2. **Prepare Hubitat:**
+   - Go to Settings > Zigbee Details
+   - Click "Rebuild Zigbee Network" (do this twice)
+   - Start pairing with "Pair while trying to avoid Zigbee 3.0 repeaters" option
+3. **First pairing:** Hold the FP1E button for 5 seconds until LED blinks, let it pair
+4. **DON'T delete the device** even if it appears incomplete
+5. **Reboot the hub**
+6. **Second pairing:** Put hub in pairing mode again, hold FP1E button again
+7. The hub will recognize the existing device and complete initialization
+8. Assign the "Aqara FP1E Presence Sensor" driver and click Configure
+
+---
+
 #### Tuya/Zemismart 1-Gang Switch with Power Monitoring
 **Location:** `Drivers/Tuya/tuya_1gang_switch_power.groovy`
 
@@ -197,6 +233,18 @@ A diagnostic driver to discover Zigbee device capabilities.
 - Discovers all endpoints, clusters, and attributes
 - Helps create custom drivers for unsupported devices
 - Generates fingerprints for device matching
+- Aqara-specific initialization (magic byte for third-party hub support)
+- FP1E presence sensor discovery mode
+- Test commands for switches and presence sensors
+
+**Commands:**
+- `discoverAll` - Full device discovery (endpoints, clusters, attributes)
+- `discoverEndpoints` - Discover active endpoints only
+- `readAqaraCluster` - Read Aqara FCC0 cluster attributes
+- `initializeAqara` - Initialize Aqara devices for third-party hub
+- `discoverFP1E` - Specialized discovery for FP1E presence sensor
+- `testSwitchOn/Off` - Test switch control
+- `testPresence` - Test presence sensor attributes
 
 ---
 
@@ -238,7 +286,8 @@ hubitat/
 │   │   ├── aqara_h1_eu_single_switch.groovy
 │   │   ├── aqara_smart_plug_eu.groovy
 │   │   ├── aqara_h1_double_rocker_remote.groovy
-│   │   └── aqara_wall_outlet_h2_eu.groovy
+│   │   ├── aqara_wall_outlet_h2_eu.groovy
+│   │   └── aqara_fp1e_presence.groovy
 │   ├── Sonoff/
 │   │   └── zigbee-sonoff-trvzb.groovy
 │   ├── Tuya/
@@ -302,6 +351,10 @@ The following resources were used as references during development:
 - [Aqara H1 Remote Support](https://github.com/Koenkk/zigbee-herdsman-converters/issues/2620) - Technical implementation details
 - [Zigbee2MQTT - Aqara Wall Outlet H2 EU](https://www.zigbee2mqtt.io/devices/WP-P01D.html) - Aqara Wall Outlet H2 EU documentation
 - [Aqara Wall Outlet H2 Product Page](https://www.aqara.com/en/product/wall-outlet-h2-eu/) - Official product specifications
+- [Zigbee2MQTT - Aqara FP1E](https://www.zigbee2mqtt.io/devices/FP1E.html) - Aqara FP1E presence sensor documentation
+- [Aqara FP1E Product Page](https://www.aqara.com/en/product/presence-sensor-fp1e/) - Official product specifications
+- [Hubitat FP1E Community Thread](https://community.hubitat.com/t/aqara-fp1e-presence-sensor/142027) - Community pairing solutions
+- [kkossev Aqara P1 Motion Sensor Driver](https://github.com/kkossev/Hubitat/blob/main/Drivers/Aqara%20P1%20Motion%20Sensor/Aqara_P1_Motion_Sensor.groovy) - Reference implementation
 - [Blakadder Zigbee Database](https://zigbee.blakadder.com/) - Device compatibility information
 - Hubitat Generic Zigbee Switch driver - Base implementation reference
 

@@ -19,9 +19,17 @@
  *  - Power outage counter
  *  - Health check monitoring
  *
- *  Version: 1.1.4
+ *  Version: 1.1.6
  *
  *  Changelog:
+ *  1.1.6 - Fixed current value (divide by 1000 - value is in milliamps)
+ *        - Ignore bad temperature from cluster 0402 (F7 is primary source)
+ *        - Ignore bad voltage from attribute 0502 (F7 is primary source)
+ *  1.1.5 - Fixed value parsing for each data type individually
+ *        - Temperature uses integer parsing (Int8 from F7)
+ *        - Voltage/Current/Power use Float-specific String.format
+ *        - Removed switchEndpoint preference (only endpoint 01 works)
+ *        - Simplified fingerprints
  *  1.1.4 - Fixed floating point precision using String.format for IEEE 754 values
  *        - Removed EnergyMeter capability (not needed)
  *        - Use BigDecimal arithmetic to avoid precision loss
@@ -46,7 +54,7 @@ import groovy.transform.Field
 
 // ==================== Constants ====================
 
-@Field static final String DRIVER_VERSION = "1.1.4"
+@Field static final String DRIVER_VERSION = "1.1.6"
 
 // Default endpoint for switch control - This device uses endpoint 01 for the outlet
 @Field static final String DEFAULT_SWITCH_ENDPOINT = "01"
@@ -144,37 +152,19 @@ metadata {
                                            description: "Auto-off when charging complete"]]
         command "setChargingLimit", [[name: "power*", type: "NUMBER", description: "Charging complete threshold (0.1-2W)"]]
 
-        // Fingerprints - various combinations for device discovery
-        // Main endpoint 01
+        // Fingerprints for device discovery
         fingerprint profileId: "0104", endpointId: "01",
                     inClusters: "0000,0003,0004,0005,0006,0012,0402,0702,0B04,FCC0",
                     outClusters: "000A,0019",
                     manufacturer: "Aqara", model: "lumi.plug.aeu001",
                     deviceJoinName: "Aqara Wall Outlet H2 EU"
 
-        // Endpoint 02
-        fingerprint profileId: "0104", endpointId: "02",
-                    inClusters: "0006",
-                    manufacturer: "Aqara", model: "lumi.plug.aeu001",
-                    deviceJoinName: "Aqara Wall Outlet H2 EU"
-
-        // Green Power endpoint 15 (0x15 = 21)
-        fingerprint profileId: "A1E0", endpointId: "F2",
-                    inClusters: "0021",
-                    manufacturer: "Aqara", model: "lumi.plug.aeu001",
-                    deviceJoinName: "Aqara Wall Outlet H2 EU"
-
-        // Simple fingerprints by manufacturer/model only
         fingerprint manufacturer: "Aqara", model: "lumi.plug.aeu001",
                     deviceJoinName: "Aqara Wall Outlet H2 EU"
 
         fingerprint manufacturer: "LUMI", model: "lumi.plug.aeu001",
                     deviceJoinName: "Aqara Wall Outlet H2 EU"
 
-        fingerprint manufacturer: "aqara", model: "lumi.plug.aeu001",
-                    deviceJoinName: "Aqara Wall Outlet H2 EU"
-
-        // Model-only fingerprint (manufacturer may be blank/unknown on some devices)
         fingerprint model: "lumi.plug.aeu001",
                     deviceJoinName: "Aqara Wall Outlet H2 EU"
     }
@@ -203,11 +193,6 @@ metadata {
                   ["120": "Every 2 hours"]
               ],
               defaultValue: "60"
-
-        input name: "switchEndpoint", type: "enum", title: "Switch endpoint",
-              description: "Endpoint to use for switch control (try 02 if 01 doesn't work)",
-              options: [["01": "Endpoint 01 (default)"], ["02": "Endpoint 02"]],
-              defaultValue: "01"
 
         // Divisor settings (auto-detected but can be overridden)
         input name: "powerDivisor", type: "number", title: "Power divisor",
@@ -463,9 +448,9 @@ def ping() {
 
 // ==================== Switch Commands ====================
 
-// Get the configured switch endpoint
+// Get the switch endpoint - always endpoint 01
 private String getSwitchEndpoint() {
-    return settings?.switchEndpoint ?: DEFAULT_SWITCH_ENDPOINT
+    return "01"
 }
 
 def on() {
@@ -734,6 +719,11 @@ private List handleTemperatureCluster(String attrId, String value) {
 
     if (attrId == "0000") {
         Integer rawTemp = hexToSignedInt(value)
+        // Skip if temperature is 0 - likely not a real reading (F7 data is more reliable)
+        if (rawTemp == 0) {
+            logDebug "Temperature cluster returned 0, ignoring (F7 data is primary source)"
+            return events
+        }
         BigDecimal tempC = rawTemp / 100.0
 
         // Convert to Fahrenheit if needed
@@ -827,8 +817,13 @@ private List handleElectricalCluster(String attrId, String value) {
             logDebug "Power divisor: ${state.powerDivisor}"
             break
 
-        case "0502":  // RMS Voltage (alternative attribute)
+        case "0502":  // RMS Voltage (alternative attribute) - often returns bad values
             Integer rawVoltage2 = Integer.parseInt(value, 16)
+            // Skip unrealistic values - F7 data is the reliable source for voltage
+            if (rawVoltage2 < 1000) {  // Real voltage should be ~2300 (decivolts)
+                logDebug "Voltage (0502) returned unrealistic value ${rawVoltage2}, ignoring (F7 data is primary)"
+                break
+            }
             BigDecimal vDivisor2 = state.voltageDivisor ?: (voltageDivisor ?: 10)
             BigDecimal voltage2 = rawVoltage2 / vDivisor2
             voltage2 = formatDecimal(voltage2, 1)
@@ -1050,16 +1045,17 @@ private List parseAqaraF7Struct(String hexString) {
                     logDebug "Battery voltage: ${value} mV"
                     break
 
-                case 0x03:  // Device temperature (°C)
+                case 0x03:  // Device temperature (°C) - comes as Int8
                     if (value != null) {
-                        BigDecimal tempC = safeToBigDecimal(value)
-                        BigDecimal temp = tempC
+                        log.info "TEMP RAW: value=${value}"
+                        int tempInt = value as int
+                        BigDecimal temp = new BigDecimal(tempInt)
                         String unit = "°C"
                         if (tempUnit == "F") {
-                            temp = tempC.multiply(new BigDecimal("1.8")).add(new BigDecimal("32"))
+                            temp = temp.multiply(new BigDecimal("1.8")).add(new BigDecimal("32"))
                             unit = "°F"
                         }
-                        temp = formatDecimal(temp, 1)
+                        temp = temp.setScale(1, BigDecimal.ROUND_HALF_UP)
                         events << createEvent(name: "temperature", value: temp, unit: unit)
                         logInfo "Temperature: ${temp}${unit}"
                     }
@@ -1101,28 +1097,58 @@ private List parseAqaraF7Struct(String hexString) {
                     }
                     break
 
-                case 0x96:  // Voltage (float - raw value is in decivolts, divide by 10)
+                case 0x96:  // Voltage - raw value in decivolts (e.g., 2321 = 232.1V)
                     if (value != null) {
-                        BigDecimal voltage = safeToBigDecimal(value).divide(new BigDecimal("10"), 2, BigDecimal.ROUND_HALF_UP)
-                        voltage = formatDecimal(voltage, 1)
+                        log.info "VOLTAGE RAW: value=${value}, instanceof Float=${value instanceof Float}"
+                        // Value should be ~2300 decivolts for 230V
+                        BigDecimal rawVoltage
+                        if (value instanceof Float) {
+                            rawVoltage = new BigDecimal(String.format("%.1f", value))
+                        } else if (value instanceof Integer || value instanceof Long) {
+                            rawVoltage = new BigDecimal(value)
+                        } else {
+                            rawVoltage = new BigDecimal(value.toString())
+                        }
+                        log.info "VOLTAGE CLEANED: rawVoltage=${rawVoltage}"
+                        // Divide by 10 to get actual volts
+                        BigDecimal voltage = rawVoltage.divide(new BigDecimal("10"), 1, BigDecimal.ROUND_HALF_UP)
                         events << createEvent(name: "voltage", value: voltage, unit: "V")
                         logInfo "Voltage: ${voltage} V"
                     }
                     break
 
-                case 0x97:  // Current (float in A)
+                case 0x97:  // Current - value is in milliamps, divide by 1000 to get amps
                     if (value != null) {
-                        BigDecimal current = safeToBigDecimal(value)
-                        current = formatDecimal(current, 3)
+                        log.info "CURRENT RAW: value=${value}, instanceof Float=${value instanceof Float}"
+                        BigDecimal current
+                        if (value instanceof Float) {
+                            // Float value is in milliamps - divide by 1000
+                            current = new BigDecimal(String.format("%.6f", value)).divide(new BigDecimal("1000"), 6, BigDecimal.ROUND_HALF_UP)
+                        } else if (value instanceof Integer || value instanceof Long) {
+                            current = new BigDecimal(value).divide(new BigDecimal("1000"), 6, BigDecimal.ROUND_HALF_UP)
+                        } else {
+                            current = new BigDecimal(value.toString()).divide(new BigDecimal("1000"), 6, BigDecimal.ROUND_HALF_UP)
+                        }
+                        log.info "CURRENT CLEANED: current=${current}"
+                        current = current.setScale(3, BigDecimal.ROUND_HALF_UP)
                         events << createEvent(name: "amperage", value: current, unit: "A")
                         logInfo "Current: ${current} A"
                     }
                     break
 
-                case 0x98:  // Power (float, watts)
+                case 0x98:  // Power in watts
                     if (value != null) {
-                        BigDecimal power = safeToBigDecimal(value)
-                        power = formatDecimal(power, 1)
+                        log.info "POWER RAW: value=${value}, instanceof Float=${value instanceof Float}"
+                        BigDecimal power
+                        if (value instanceof Float) {
+                            power = new BigDecimal(String.format("%.2f", value))
+                        } else if (value instanceof Integer || value instanceof Long) {
+                            power = new BigDecimal(value)
+                        } else {
+                            power = new BigDecimal(value.toString())
+                        }
+                        log.info "POWER CLEANED: power=${power}"
+                        power = power.setScale(1, BigDecimal.ROUND_HALF_UP)
                         events << createEvent(name: "power", value: power, unit: "W")
                         logInfo "Power: ${power} W"
                     }
