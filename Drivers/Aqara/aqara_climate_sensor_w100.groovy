@@ -6,7 +6,7 @@
  *  A driver for the Aqara Climate Sensor W100 with temperature, humidity,
  *  3 buttons (plus/center/minus), and optional external sensor support.
  *
- *  Version: 1.0.1
+ *  Version: 1.0.2
  *
  *  Clusters:
  *    0x0000 - Basic
@@ -336,7 +336,10 @@ private void parseHumidityCluster(String attrId, String value) {
         def humidity = rawHumidity / 100.0
         def offset = settings?.humidityOffset ?: 0
         humidity = humidity + offset
-        humidity = formatDecimal(Math.min(100, Math.max(0, humidity)), 1)
+        // Clamp to 0-100 range
+        if (humidity < 0) humidity = 0
+        if (humidity > 100) humidity = 100
+        humidity = formatDecimal(humidity, 1)
 
         logInfo "Humidity: ${humidity}%"
         sendEvent(name: "humidity", value: humidity, unit: "%", descriptionText: "Humidity is ${humidity}%")
