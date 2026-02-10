@@ -26,6 +26,26 @@ A comprehensive driver for the SONOFF TRVZB Thermostatic Radiator Valve.
 
 ---
 
+#### Sonoff SNZB-04P Contact Sensor
+**Location:** `Drivers/Sonoff/sonoff_snzb04p_contact.groovy`
+
+Driver for the Sonoff SNZB-04P door/window contact sensor with tamper detection.
+
+**Features:**
+- Contact sensor (open/closed)
+- **Tamper detection** (via Sonoff custom cluster FC11)
+- Battery monitoring (percentage and voltage)
+- Battery low warning
+- Auto-reset tamper option (1 min, 5 min, 1 hour, or manual)
+- Last tamper time tracking
+- IAS Zone status parsing
+
+**Supported Models:** SNZB-04P
+
+**Note:** The tamper sensor is triggered when the back cover is removed or the tamper button is pressed. This is useful for security monitoring.
+
+---
+
 #### Aqara H1 EU Single Switch
 **Location:** `Drivers/Aqara/aqara_h1_eu_single_switch.groovy`
 
@@ -289,7 +309,8 @@ hubitat/
 │   │   ├── aqara_wall_outlet_h2_eu.groovy
 │   │   └── aqara_fp1e_presence.groovy
 │   ├── Sonoff/
-│   │   └── zigbee-sonoff-trvzb.groovy
+│   │   ├── zigbee-sonoff-trvzb.groovy
+│   │   └── sonoff_snzb04p_contact.groovy
 │   ├── Tuya/
 │   │   ├── tuya_1gang_switch_power.groovy
 │   │   └── tuya_ts130f_curtain_motor.groovy
@@ -339,8 +360,10 @@ The following resources were used as references during development:
 - [Zigbee Cluster Library (ZCL) Specification](https://zigbeealliance.org/developer_resources/zigbee-cluster-library/) - Official Zigbee cluster definitions
 - [Zigbee2MQTT Device Documentation](https://www.zigbee2mqtt.io/devices/) - Device-specific cluster and attribute information
 
-#### Sonoff TRVZB
+#### Sonoff Devices
 - [Zigbee2MQTT - Sonoff TRVZB](https://www.zigbee2mqtt.io/devices/TRVZB.html) - Device specifications and custom cluster (FC11) documentation
+- [Zigbee2MQTT - Sonoff SNZB-04P](https://www.zigbee2mqtt.io/devices/SNZB-04P.html) - SNZB-04P contact sensor documentation
+- [Sonoff SNZB-04P Product Page](https://sonoff.tech/en-us/products/sonoff-zigbee-door-window-sensor-snzb-04p) - Official product specifications
 - [Koenkk/zigbee-herdsman-converters](https://github.com/Koenkk/zigbee-herdsman-converters) - Converter implementations and attribute mappings
 
 #### Aqara Devices
