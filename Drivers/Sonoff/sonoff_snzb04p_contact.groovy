@@ -5,7 +5,7 @@
  *
  *  A driver for the Sonoff SNZB-04P door/window contact sensor with tamper detection.
  *
- *  Version: 1.0.0
+ *  Version: 1.0.1 - Fixed tamper not auto-clearing when device sends clear signal
  *
  *  Clusters:
  *    0x0000 - Basic
@@ -62,6 +62,8 @@ metadata {
                   ["300": "5 minutes"],
                   ["3600": "1 hour"]
               ], defaultValue: "0"
+        input name: "tamperSticky", type: "bool", title: "Sticky tamper (ignore device clear signal)", defaultValue: true,
+              description: "When enabled, tamper stays 'detected' until manually cleared or auto-reset timer expires"
     }
 }
 
@@ -336,8 +338,13 @@ private void handleTamperValue(String value) {
     if (tampered) {
         handleTamperDetected("FC11 cluster")
     } else {
-        logInfo "Tamper: clear"
-        sendEvent(name: "tamper", value: "clear", descriptionText: "Tamper is clear")
+        // Only clear if sticky mode is disabled
+        if (settings?.tamperSticky == false) {
+            logInfo "Tamper: clear (from device)"
+            sendEvent(name: "tamper", value: "clear", descriptionText: "Tamper cleared by device")
+        } else {
+            logDebug "Tamper clear signal from device ignored (sticky mode enabled)"
+        }
     }
 }
 
@@ -346,9 +353,11 @@ private void handleTamperDetected(String source) {
     sendEvent(name: "tamper", value: "detected", descriptionText: "Tamper detected")
     sendEvent(name: "lastTamperTime", value: new Date().format("yyyy-MM-dd HH:mm:ss"))
 
-    // Schedule auto-reset if configured
+    // Cancel any pending auto-reset and reschedule if configured
+    unschedule("clearTamper")
     def autoReset = settings?.tamperAutoReset?.toInteger() ?: 0
     if (autoReset > 0) {
+        logDebug "Scheduling tamper auto-reset in ${autoReset} seconds"
         runIn(autoReset, "clearTamper")
     }
 }
