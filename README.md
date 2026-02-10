@@ -133,6 +133,29 @@ Comprehensive driver for the Aqara Wall Outlet H2 EU with power monitoring.
 
 ---
 
+#### Aqara Climate Sensor W100
+**Location:** `Drivers/Aqara/aqara_climate_sensor_w100.groovy`
+
+Driver for the Aqara Climate Sensor W100 with temperature, humidity, and 3 buttons.
+
+**Features:**
+- Temperature measurement with configurable offset
+- Humidity measurement with configurable offset
+- 3 buttons (Plus/Center/Minus) with push, hold, double-tap, release
+- Battery monitoring (percentage and voltage)
+- External sensor support (temperature/humidity from connected sensor)
+- Power outage counter
+- F7 TLV data parsing
+
+**Supported Models:** lumi.sensor_ht.agl001
+
+**Button Mapping:**
+- Button 1: Plus (+) button
+- Button 2: Center button
+- Button 3: Minus (-) button
+
+---
+
 #### Aqara FP1E Presence Sensor
 **Location:** `Drivers/Aqara/aqara_fp1e_presence.groovy`
 
@@ -307,7 +330,8 @@ hubitat/
 │   │   ├── aqara_smart_plug_eu.groovy
 │   │   ├── aqara_h1_double_rocker_remote.groovy
 │   │   ├── aqara_wall_outlet_h2_eu.groovy
-│   │   └── aqara_fp1e_presence.groovy
+│   │   ├── aqara_fp1e_presence.groovy
+│   │   └── aqara_climate_sensor_w100.groovy
 │   ├── Sonoff/
 │   │   ├── zigbee-sonoff-trvzb.groovy
 │   │   └── sonoff_snzb04p_contact.groovy
@@ -378,6 +402,9 @@ The following resources were used as references during development:
 - [Aqara FP1E Product Page](https://www.aqara.com/en/product/presence-sensor-fp1e/) - Official product specifications
 - [Hubitat FP1E Community Thread](https://community.hubitat.com/t/aqara-fp1e-presence-sensor/142027) - Community pairing solutions
 - [kkossev Aqara P1 Motion Sensor Driver](https://github.com/kkossev/Hubitat/blob/main/Drivers/Aqara%20P1%20Motion%20Sensor/Aqara_P1_Motion_Sensor.groovy) - Reference implementation
+- [Aqara W100 Climate Sensor Product Page](https://www.aqara.com/en/product/climate-sensor-w100/) - Official product specifications
+- [Hubitat W100 Community Thread](https://community.hubitat.com/t/beta-aqara-climate-sensor-w100-zigbee-driver/155433) - Community driver discussion
+- [kkossev W100 Driver](https://github.com/kkossev/Hubitat/tree/development/Drivers/Aqara%20Climate%20Sensor%20W100) - Reference implementation
 - [Blakadder Zigbee Database](https://zigbee.blakadder.com/) - Device compatibility information
 - Hubitat Generic Zigbee Switch driver - Base implementation reference
 
