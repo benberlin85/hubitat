@@ -6,7 +6,7 @@
  *  A driver for the Aqara Climate Sensor W100 with temperature, humidity,
  *  3 buttons (plus/center/minus), and optional external sensor support.
  *
- *  Version: 1.0.2
+ *  Version: 1.0.3
  *
  *  Clusters:
  *    0x0000 - Basic
@@ -294,7 +294,9 @@ private void parsePowerCluster(String attrId, String value) {
             logInfo "Battery voltage: ${volts}V"
             sendEvent(name: "batteryVoltage", value: volts, unit: "V")
             // Calculate percentage from voltage (3.0V = 100%, 2.7V = 0%)
-            def percent = Math.min(100, Math.max(0, ((volts - 2.7) / 0.3 * 100).toInteger()))
+            def percent = ((volts - 2.7) / 0.3 * 100).toInteger()
+            if (percent < 0) percent = 0
+            if (percent > 100) percent = 100
             sendEvent(name: "battery", value: percent, unit: "%", descriptionText: "Battery is ${percent}%")
             break
         case "0021":  // Battery percentage
@@ -503,7 +505,9 @@ private String decodeString(String hex) {
     def result = ""
     try {
         for (int i = 0; i < hex.length(); i += 2) {
-            def charCode = Integer.parseInt(hex.substring(i, Math.min(i + 2, hex.length())), 16)
+            def endIdx = i + 2
+            if (endIdx > hex.length()) endIdx = hex.length()
+            def charCode = Integer.parseInt(hex.substring(i, endIdx), 16)
             if (charCode >= 32 && charCode < 127) result += (char)charCode
         }
     } catch (e) {
