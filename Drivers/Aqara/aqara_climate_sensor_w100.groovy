@@ -6,7 +6,7 @@
  *  A driver for the Aqara Climate Sensor W100 with temperature, humidity,
  *  3 buttons (plus/center/minus), and optional external sensor support.
  *
- *  Version: 1.0.3
+ *  Version: 1.1.0
  *
  *  Clusters:
  *    0x0000 - Basic
@@ -51,6 +51,12 @@ metadata {
         attribute "externalTemperature", "number"
         attribute "externalHumidity", "number"
         attribute "powerOutageCount", "number"
+        attribute "sensorMode", "string"
+
+        // Commands for external sensor display
+        command "setExternalTemperature", [[name: "temperature", type: "NUMBER", description: "Temperature in °C (-100 to 100)"]]
+        command "setExternalHumidity", [[name: "humidity", type: "NUMBER", description: "Humidity in % (0 to 100)"]]
+        command "setSensorMode", [[name: "mode", type: "ENUM", constraints: ["internal", "external"], description: "Display internal or external sensor"]]
 
         // Fingerprints
         fingerprint profileId: "0104", endpointId: "01",
@@ -172,6 +178,87 @@ def refresh() {
     cmds += zigbee.readAttribute(0xFCC0, 0x00F7, [mfgCode: AQARA_MFG_CODE])
 
     return cmds
+}
+
+// ==================== External Sensor Commands ====================
+
+/**
+ * Set the sensor display mode
+ * @param mode "internal" to show built-in sensor, "external" to show values from setExternalTemperature/Humidity
+ */
+def setSensorMode(String mode) {
+    logInfo "Setting sensor mode to: ${mode}"
+
+    def modeValue = (mode == "external") ? 0x02 : 0x01
+    sendEvent(name: "sensorMode", value: mode, descriptionText: "Sensor mode set to ${mode}")
+
+    return zigbee.writeAttribute(0xFCC0, 0x0172, 0x23, modeValue, [mfgCode: AQARA_MFG_CODE])
+}
+
+/**
+ * Set external temperature to display on W100
+ * Use this with Rule Machine to push temperature from another device (like your main thermostat)
+ * @param temperature Temperature in degrees Celsius (-100 to 100)
+ */
+def setExternalTemperature(BigDecimal temperature) {
+    if (temperature == null) {
+        log.warn "setExternalTemperature: temperature cannot be null"
+        return
+    }
+
+    // Clamp to valid range
+    if (temperature < -100) temperature = -100
+    if (temperature > 100) temperature = 100
+
+    logInfo "Setting external temperature to: ${temperature}°C"
+    sendEvent(name: "externalTemperature", value: temperature, unit: "°C", descriptionText: "External temperature set to ${temperature}°C")
+
+    // Convert to centidegrees (x100) as signed 16-bit integer
+    def centidegrees = (temperature * 100).toInteger()
+
+    // Build the Lumi/Aqara frame for FFF2 attribute
+    // Format: Header (05 01) + Tag (66) + Type (29 = Int16) + Value (little-endian)
+    def tempLow = centidegrees & 0xFF
+    def tempHigh = (centidegrees >> 8) & 0xFF
+    def payload = [0x05, 0x01, 0x66, 0x29, tempLow, tempHigh]
+    def hexPayload = payload.collect { String.format('%02X', it & 0xFF) }.join('')
+
+    logDebug "External temp payload: ${hexPayload}"
+
+    return zigbee.writeAttribute(0xFCC0, 0xFFF2, 0x41, hexPayload, [mfgCode: AQARA_MFG_CODE])
+}
+
+/**
+ * Set external humidity to display on W100
+ * Use this with Rule Machine to push humidity from another device
+ * @param humidity Humidity percentage (0 to 100)
+ */
+def setExternalHumidity(BigDecimal humidity) {
+    if (humidity == null) {
+        log.warn "setExternalHumidity: humidity cannot be null"
+        return
+    }
+
+    // Clamp to valid range
+    if (humidity < 0) humidity = 0
+    if (humidity > 100) humidity = 100
+
+    logInfo "Setting external humidity to: ${humidity}%"
+    sendEvent(name: "externalHumidity", value: humidity, unit: "%", descriptionText: "External humidity set to ${humidity}%")
+
+    // Convert to centi-percent (x100) as unsigned 16-bit integer
+    def centiPercent = (humidity * 100).toInteger()
+
+    // Build the Lumi/Aqara frame for FFF2 attribute
+    // Format: Header (05 01) + Tag (67) + Type (21 = Uint16) + Value (little-endian)
+    def humLow = centiPercent & 0xFF
+    def humHigh = (centiPercent >> 8) & 0xFF
+    def payload = [0x05, 0x01, 0x67, 0x21, humLow, humHigh]
+    def hexPayload = payload.collect { String.format('%02X', it & 0xFF) }.join('')
+
+    logDebug "External humidity payload: ${hexPayload}"
+
+    return zigbee.writeAttribute(0xFCC0, 0xFFF2, 0x41, hexPayload, [mfgCode: AQARA_MFG_CODE])
 }
 
 // ==================== Parse ====================
